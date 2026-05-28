@@ -4,13 +4,13 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-numpy = ">=1.24"
-torch = ">=2.1"
-matplotlib = ">=3.7"
-scikit-learn = "*"
-pennylane = ">=0.38"
-datasets = "*"
-tqdm = "*"
+numpy = "~=2.4"
+torch = "~=2.12"
+matplotlib = "~=3.10"
+scikit-learn = "~=1.8"
+pennylane = "~=0.45"
+datasets = "~=4.8"
+tqdm = "~=4.67"
 
 [dev-packages]
 jupyterlab = "*"
