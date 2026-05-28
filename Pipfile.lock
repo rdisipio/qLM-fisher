@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "61f1e2da3dac576c6f262d3310988a68f648a43e9044058f757ea92d2e57f0a5"
+            "sha256": "1f3a1a0af648230fe87eef5fb48e9f17ed1cb8be69237d3b0f4fc6a52e91b6ce"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -751,19 +751,19 @@
         },
         "huggingface-hub": {
             "hashes": [
-                "sha256:023bacd155f837d3fa56379ac8e23dababe6d6d87b04f8dacc258a44a38abe01",
-                "sha256:994ec184c3330952d7b5f131ea0b1a6ba1047bd05461f5dec191f8fc1099fbd7"
+                "sha256:3b8156d23118e87f6a587648bfbc04f04a12a757ccb4ed298b35c4ae638bf24c",
+                "sha256:fad842b6763ef70ebc3919665b1b9273645203185400a7d6c5eddc2323cc3435"
             ],
             "markers": "python_full_version >= '3.10.0'",
-            "version": "==1.16.4"
+            "version": "==1.17.0"
         },
         "idna": {
             "hashes": [
-                "sha256:cc246e3a3f89580c3a951b5ad298ca4638078b2cdd4f115654332b5c26daded5",
-                "sha256:d7a6da03db833450fca25d2358ac9ff06cd624577a4aea3a596d5c0f77b8e03d"
+                "sha256:466e48829084efe2548012b855df21540b96f2e20e51bd124c851536556a592c",
+                "sha256:5eb0cb53bc467c12eadcf6de83163ad8527cec9416f44b9b61b19caedad2b87f"
             ],
             "markers": "python_version >= '3.9'",
-            "version": "==3.16"
+            "version": "==3.17"
         },
         "jinja2": {
             "hashes": [
@@ -2872,11 +2872,11 @@
         },
         "idna": {
             "hashes": [
-                "sha256:cc246e3a3f89580c3a951b5ad298ca4638078b2cdd4f115654332b5c26daded5",
-                "sha256:d7a6da03db833450fca25d2358ac9ff06cd624577a4aea3a596d5c0f77b8e03d"
+                "sha256:466e48829084efe2548012b855df21540b96f2e20e51bd124c851536556a592c",
+                "sha256:5eb0cb53bc467c12eadcf6de83163ad8527cec9416f44b9b61b19caedad2b87f"
             ],
             "markers": "python_version >= '3.9'",
-            "version": "==3.16"
+            "version": "==3.17"
         },
         "ipykernel": {
             "hashes": [
