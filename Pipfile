@@ -1,0 +1,20 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+numpy = ">=1.24"
+torch = ">=2.1"
+matplotlib = ">=3.7"
+scikit-learn = "*"
+pennylane = ">=0.38"
+datasets = "*"
+tqdm = "*"
+
+[dev-packages]
+jupyterlab = "*"
+ipykernel = "*"
+
+[requires]
+python_version = "3.13"
