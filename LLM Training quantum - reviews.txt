@@ -1,0 +1,139 @@
+Here are the editor comments, if any:
+All reviewers recommend major revision. The authors are encouraged to thoroughly address reviewers' feedback and submit a major revision.
+
+
+Here are the reviewers' comments:
+
+Referee: 1
+
+Comments:
+The paper entitled "Rethinking LLM Training through Information Geometry and Quantum Metrics" is, in my opinion, an interesting perspective piece, but it mostly states analogies and definitions and does not provide concrete calculations or simulations that would substantiate the stronger-sounding implications about optimization or scaling.​
+
+The manuscript frames LLM training as optimization on a curved statistical manifold and motivates curvature-aware learning via the Fisher information metric and natural gradient descent. It then extends the discussion to a quantum-geometric analogy, emphasizing the Fubini–Study metric and the quantum Fisher information (QFI) as a potentially “richer” geometry that might imply more curvature-aware trajectories. The paper explicitly positions these ideas as speculative and oriented toward future directions rather than as a results paper.​
+
+No explicit Fisher (or approximate Fisher) computation is shown for any model (even a toy network), despite repeatedly arguing that curvature/metrics clarify training dynamics and generalization. The paper asserts potential implications for scaling-law behavior (e.g., alternative scaling regimes under QFI-like curvature) but does not supply a derivation, a falsifiable prediction, or even a back-of-the-envelope estimate tying metric properties to scaling exponents or compute/data tradeoffs. The central quantum claim (“quantum systems bake in geometry” and might enable intrinsically curvature-aware optimization) is not supported by a concrete mapping from LLM training variables to a quantum-state manifold, nor by an example where QFI-based updates are actually computed and compared to classical approximations.​
+
+In my opinion, the author should add a minimal worked example (e.g., logistic regression or a 2-layer MLP) where the Fisher information matrix is computed explicitly and one step of natural gradient is compared numerically to SGD under a controlled reparameterization; this would directly demonstrate the “geometry matters” claim in a reproducible way.
+
+Moreover, the author should also consider an LLM-relevant approximation experiment (small transformer is enough): compute an empirical Fisher or K-FAC-style approximation, report summary scalars (trace, top eigenvalues, condition number proxies), and correlate them with training phase (early/late) and with a simple generalization proxy (train–validation gap).
+
+If the quantum section is kept, the author should include at least one explicit toy “quantum-inspired” optimization computation (e.g., define a parameterized state, compute the Fubini–Study metric/QFI, and show how the induced update differs from a Fisher/natural-gradient update on the analogous classical probabilistic model), otherwise the discussion reads as metaphor rather than an actionable framework.
+
+In conclusions, as written, the paper is best categorized as a short conceptual survey/perspective that motivates information-geometric thinking and proposes quantum geometry as an organizing analogy, not as a paper that evidences improved optimization. A reasonable revision request is to either (a) downgrade claims to clearly non-empirical, metaphor-guided hypotheses, or (b) add at least one worked Fisher/natural-gradient calculation and one small empirical study so the narrative is anchored to measurable quantities.
+Finally, the manuscript already acknowledges practical obstacles (Fisher inversion cost; quantum hardware limits), so adding even modest computations would substantially improve credibility without changing its scope.
+
+Additional Questions:
+Is the information in the paper sound, factual, and accurate?: Yes
+
+If not, please explain why:
+
+Rate how well the ideas are presented (very difficult to understand=1), very easy to understand=5): 4
+
+Rate the overall quality of the writing (very poor=1), (excellent=5): 3
+
+Rate the technical quality (very high=5), (high=4), (moderately high=3), (low=2), (very low=1): 2
+
+Rate the relevance to significant areas of research or practice (very high=5), (high=4), (moderately high=3), (low=2), (very low=1): 4
+
+Rate the general level of interest (very high=5), (high=4), (moderately high=3), (low=2), (very low=1): 4
+
+Does this paper cite and use appropriate references?: Yes
+
+If not, what important references are missing?:
+
+Should anything be deleted from or condensed in the paper?: No
+
+If so, please explain:
+
+Is the treatment of the subject complete?: No
+
+If not, what important details/ideas/analyses are missing?: see my comments to the author.
+
+Please help ACM create a more efficient time-to-publication process: Using your best judgment, what amount of copy editing do you think this paper needs?: Moderate
+
+Most ACM journal papers are researcher-oriented. Is this paper of potential interest to developers and engineers?: Yes
+
+
+Referee: 2
+
+Comments:
+(There are no comments.)
+
+Additional Questions:
+Is the information in the paper sound, factual, and accurate?: Yes
+
+If not, please explain why:
+
+Rate how well the ideas are presented (very difficult to understand=1), very easy to understand=5): 4
+
+Rate the overall quality of the writing (very poor=1), (excellent=5): 4
+
+Rate the technical quality (very high=5), (high=4), (moderately high=3), (low=2), (very low=1): 2
+
+Rate the relevance to significant areas of research or practice (very high=5), (high=4), (moderately high=3), (low=2), (very low=1): 4
+
+Rate the general level of interest (very high=5), (high=4), (moderately high=3), (low=2), (very low=1): 2
+
+Does this paper cite and use appropriate references?: Yes
+
+If not, what important references are missing?:
+
+Should anything be deleted from or condensed in the paper?: No
+
+If so, please explain:
+
+Is the treatment of the subject complete?: No
+
+If not, what important details/ideas/analyses are missing?: Although the idea is new and innovative, there isn't any actual evidence showing quantum systems provide more efficient optimization paths.
+
+Please help ACM create a more efficient time-to-publication process: Using your best judgment, what amount of copy editing do you think this paper needs?: Moderate
+
+Most ACM journal papers are researcher-oriented. Is this paper of potential interest to developers and engineers?: Yes
+
+
+Referee: 3
+
+Comments:
+The following issues require further consideration:
+
+1. The paper contains very few references, mostly basic books and early natural gradient-related literature. It lacks recent journal and conference papers related to LLM optimization.
+
+2. The authors need to explain the categories of existing work, the core assumptions of different approaches, the problems they each solve, their advantages and disadvantages, and open questions. The current version is missing some content.
+
+3. The paper's title mentions LLM training, but the main text discusses the specificities of LLM very little. It almost entirely ignores Transformer architecture, pre-training, etc.
+
+4. I suggest providing a summary table that systematically compares the categories, core ideas, advantages, and limitations of different methods.
+
+5. The conclusion section repeats the above, failing to truly "end" the discussion.
+
+
+Additional Questions:
+Is the information in the paper sound, factual, and accurate?:
+
+If not, please explain why:
+
+Rate how well the ideas are presented (very difficult to understand=1), very easy to understand=5):
+
+Rate the overall quality of the writing (very poor=1), (excellent=5):
+
+Rate the technical quality (very high=5), (high=4), (moderately high=3), (low=2), (very low=1):
+
+Rate the relevance to significant areas of research or practice (very high=5), (high=4), (moderately high=3), (low=2), (very low=1):
+
+Rate the general level of interest (very high=5), (high=4), (moderately high=3), (low=2), (very low=1):
+
+Does this paper cite and use appropriate references?:
+
+If not, what important references are missing?:
+
+Should anything be deleted from or condensed in the paper?:
+
+If so, please explain:
+
+Is the treatment of the subject complete?:
+
+If not, what important details/ideas/analyses are missing?:
+
+Please help ACM create a more efficient time-to-publication process: Using your best judgment, what amount of copy editing do you think this paper needs?: Light
+
+Most ACM journal papers are researcher-oriented. Is this paper of potential interest to developers and engineers?: Maybe
