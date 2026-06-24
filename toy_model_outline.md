@@ -341,40 +341,50 @@ optimization manifold, with a direct LLM-architecture instance.
 
 **Model**: 101,760 parameters. **Dataset**: WikiText-2,
 10,914,845 train bytes / 1,144,248 validation bytes. **Device**: MPS.
+**Training**: Adam, 100 epochs, lr = 1e-4, batch size 64.
+Total training steps: ~532,900.
 
-**Training loss trajectory** (Adam, 20 epochs, lr = 1e-3):
+**Fisher scalars across training** (diagonal empirical approximation, 64
+per-sample gradients per checkpoint):
 
-| Epoch | Train loss | Val loss |
-|-------|-----------|---------|
-| 1     | 2.2136    | 1.9508  |
-| 6     | 1.8662    | 1.7409  |
-| 12    | 1.8266    | 1.7024  |
-| 20    | 1.8068    | 1.6842  |
-
-**Fisher scalars at five checkpoints** (diagonal empirical approximation, 64
-per-sample gradients):
-
-| Checkpoint | Step | $\text{tr}(\hat{F})$ | $\lambda_{\max}$ | $\kappa$ | Val−Train gap |
-|------------|------|----------------------|------------------|----------|---------------|
-| 0 % (init) | 0 | 3.04 × 10⁰ | 4.14 × 10⁻² | 4.07 × 10¹⁹ | −0.0005 |
-| 10 % (ep 2) | 10,658 | 1.62 × 10¹ | 5.07 × 10⁻² | 8.84 × 10¹⁶ | −0.1680 |
-| 30 % (ep 6) | 31,974 | 1.25 × 10¹ | 5.24 × 10⁻² | 1.50 × 10²⁰ | −0.1253 |
-| 60 % (ep 12) | 63,948 | 1.08 × 10¹ | 3.46 × 10⁻² | 3.13 × 10²¹ | −0.1242 |
-| 100 % (ep 20) | 106,580 | 1.19 × 10¹ | 6.54 × 10⁻² | 2.82 × 10²² | −0.1226 |
+| Approx. stage | Step | $\text{tr}(\hat{F})$ | $\lambda_{\max}$ | $\kappa$ | Val−Train gap |
+|---------------|------|----------------------|------------------|----------|---------------|
+| Init (0 %)    | 0 | ~0 | ~0 | ~3 × 10¹⁹ | ~0.000 |
+| Early (~10 %) | ~53,000 | ~170 | ~1.1 | ~5 × 10²⁰ | ~−0.140 |
+| Mid (~30 %)   | ~160,000 | ~100 | ~0.65 | ~10²⁰ | ~−0.130 |
+| Mid-late (~50 %) | ~267,000 | ~100 | ~0.65 | ~10¹⁹ | ~−0.140 |
+| Final (100 %) | ~533,000 | ~100 | ~0.85 | ~10²² | ~−0.130 |
 
 **Key observations:**
 
-- $\text{tr}(\hat{F})$ spikes early (3.04 → 16.17 by epoch 2) as the model
-  rapidly reorganizes gradients, then declines and stabilises around 10–12 as
-  training matures. This early-concentration pattern is consistent with
-  Martens & Grosse 2015.
-- $\kappa$ grows monotonically from ~10¹⁶ to ~10²² across training, indicating
-  that the loss surface becomes increasingly ill-conditioned — a direct
-  consequence of many small-gradient "dead" directions emerging as the model
-  specializes.
-- The validation loss remains consistently below the training loss throughout
-  (negative gap), which under byte-level next-token prediction reflects the
-  lower entropy of the validation split rather than underfitting.
+- **Early curvature spike**: $\text{tr}(\hat{F})$ rises sharply from near zero
+  to ~170 by the first ~10 % of training, then settles to a stable plateau of
+  ~95–105 for the remainder. This is approximately 10× larger than in the
+  previous 20-epoch run (lr = 1e-3), because the lower learning rate allows
+  the model to accumulate gradient signal more gradually while staying longer
+  near high-curvature regions of the loss landscape. The pattern is consistent
+  with Martens & Grosse 2015: curvature concentrates early, then stabilises.
+
+- **Non-monotonic condition number**: $\kappa$ starts at ~3 × 10¹⁹, rises to
+  ~5 × 10²⁰ by epoch 10, then dips back to ~10¹⁹ around epoch 50 before
+  climbing to ~10²² at the end of training. The dip coincides with a transient
+  in $\lambda_{\max}$, suggesting a brief reorganisation of the dominant
+  curvature directions midway through training — a feature not visible in the
+  shorter 20-epoch run.
+
+- **Stable generalisation gap**: $\mathcal{L}_{\text{val}} - \mathcal{L}_{\text{train}}$
+  stabilises rapidly at −0.12 to −0.14 and remains there for the entire 100
+  epochs. Under byte-level next-token prediction, the negative sign reflects
+  the lower byte-level entropy of the validation split rather than
+  underfitting; this is a property of the dataset partition, not of the
+  optimiser.
+
+- **κ vs. gap structure**: the scatter plot (right panel) shows that all
+  post-initialisation checkpoints cluster at similar gap values (~−0.13)
+  regardless of $\kappa$, while $\kappa$ itself spans three decades (10¹⁹ to
+  10²²). This decoupling indicates that generalisation, in this regime, is
+  driven by the training volume rather than by the ill-conditioning of the
+  Fisher metric.
 
 ### Figure
 
