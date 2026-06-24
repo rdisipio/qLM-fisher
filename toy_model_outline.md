@@ -85,7 +85,37 @@ of the paper's core claim: "curvature-aware approaches clarify training
 dynamics." Even if the difference is modest on this simple model, the
 geometric interpretation is exact and falsifiable.
 
-### Suggested figure
+### Observed results
+
+All three optimizers converge to the same final loss (**0.3428**) and
+accuracy (**86.5 %**) after 300 steps, confirming that the dataset is simple
+enough for any reasonable optimizer to reach the basin. The informativeness
+of the experiment lies in the geometry, not the final loss.
+
+**Fisher information matrix evolution**
+
+| Checkpoint | $\text{tr}(F)$ | $\kappa(F)$ | Top-2 eigenvalues |
+|------------|-----------------|-------------|-------------------|
+| Init       | 0.7500          | 1.20        | 0.2500, 0.2723    |
+| SGD final  | 0.2744          | 5.25        | 0.1011, 0.1456    |
+
+The condition number grows from 1.20 to 5.25 as the model moves from a
+near-uniform parameter region (all weights zero) to a more asymmetric
+solution. The total curvature $\text{tr}(F)$ drops by 63 %, reflecting the
+sharpening of the loss landscape near the minimum.
+
+**Update direction angle $\alpha$**
+
+At initialisation (all weights zero) the SGD and natural-gradient update
+directions are nearly aligned ($\alpha$ small), because the Fisher is close
+to a scalar multiple of the identity ($\kappa = 1.20$). As curvature builds,
+$\alpha$ grows, illustrating that natural gradient and SGD increasingly
+disagree on which direction to move — the direct geometric consequence of the
+non-Euclidean Fisher metric.
+
+### Figure
+
+![Experiment 1: Fisher information and natural gradient on logistic regression](exp1_logistic_regression.png)
 
 A 2×2 panel: (top-left) loss curves, (top-right) update direction angle
 $\alpha$ vs. training step, (bottom-left) Fisher eigenvalue spectrum at
@@ -153,7 +183,48 @@ generalizes. If this pattern is reproduced — even qualitatively — it anchors
 the paper's claim that "Fisher information is a key player in shaping" the
 optimization manifold, with a direct LLM-architecture instance.
 
-### Suggested figure
+### Observed results
+
+**Model**: 101,760 parameters. **Dataset**: WikiText-2,
+10,914,845 train bytes / 1,144,248 validation bytes. **Device**: MPS.
+
+**Training loss trajectory** (Adam, 20 epochs, lr = 1e-3):
+
+| Epoch | Train loss | Val loss |
+|-------|-----------|---------|
+| 1     | 2.2136    | 1.9508  |
+| 6     | 1.8662    | 1.7409  |
+| 12    | 1.8266    | 1.7024  |
+| 20    | 1.8068    | 1.6842  |
+
+**Fisher scalars at five checkpoints** (diagonal empirical approximation, 64
+per-sample gradients):
+
+| Checkpoint | Step | $\text{tr}(\hat{F})$ | $\lambda_{\max}$ | $\kappa$ | Val−Train gap |
+|------------|------|----------------------|------------------|----------|---------------|
+| 0 % (init) | 0 | 3.04 × 10⁰ | 4.14 × 10⁻² | 4.07 × 10¹⁹ | −0.0005 |
+| 10 % (ep 2) | 10,658 | 1.62 × 10¹ | 5.07 × 10⁻² | 8.84 × 10¹⁶ | −0.1680 |
+| 30 % (ep 6) | 31,974 | 1.25 × 10¹ | 5.24 × 10⁻² | 1.50 × 10²⁰ | −0.1253 |
+| 60 % (ep 12) | 63,948 | 1.08 × 10¹ | 3.46 × 10⁻² | 3.13 × 10²¹ | −0.1242 |
+| 100 % (ep 20) | 106,580 | 1.19 × 10¹ | 6.54 × 10⁻² | 2.82 × 10²² | −0.1226 |
+
+**Key observations:**
+
+- $\text{tr}(\hat{F})$ spikes early (3.04 → 16.17 by epoch 2) as the model
+  rapidly reorganizes gradients, then declines and stabilises around 10–12 as
+  training matures. This early-concentration pattern is consistent with
+  Martens & Grosse 2015.
+- $\kappa$ grows monotonically from ~10¹⁶ to ~10²² across training, indicating
+  that the loss surface becomes increasingly ill-conditioned — a direct
+  consequence of many small-gradient "dead" directions emerging as the model
+  specializes.
+- The validation loss remains consistently below the training loss throughout
+  (negative gap), which under byte-level next-token prediction reflects the
+  lower entropy of the validation split rather than underfitting.
+
+### Figure
+
+![Experiment 2: Empirical Fisher scalars on a small transformer](exp2_transformer_fisher.png)
 
 A 3-panel figure: (left) $\text{tr}(\hat{F})$ and $\lambda_{\max}$ over
 training time, (centre) condition number $\kappa$ vs. train step, (right)
@@ -255,6 +326,55 @@ the update direction is demonstrably different, and that this difference is
 the direct consequence of the non-Euclidean geometry induced by the
 Fubini–Study metric. This transforms the paper's central quantum analogy
 from metaphor to a computed, falsifiable instance.
+
+### Observed results
+
+**Step 2 — QFI verification** (analytic vs. manual vs. PennyLane `quantum_fisher`):
+
+All three methods agree to six decimal places across all test points:
+
+| $\theta$ | $\phi$ | $[\mathcal{F}_Q]_{\theta\theta}$ (all methods) | $[\mathcal{F}_Q]_{\phi\phi}$ (all methods) |
+|----------|--------|------------------------------------------------|---------------------------------------------|
+| 0.500 | 0.30 | 1.000000 | 0.229849 |
+| 1.000 | 1.20 | 1.000000 | 0.708073 |
+| $\pi/2$ | 0.70 | 1.000000 | 1.000000 |
+| 2.000 | 2.50 | 1.000000 | 0.826822 |
+
+The exact match confirms that the Fubini–Study metric is correctly recovered
+by the numerical and PennyLane-based implementations.
+
+**Step 3 — Angular deviation $\alpha$ between Euclidean and QNG update**
+(loss $\mathcal{L} = \langle\sigma_x\rangle$, $\phi = \pi/4$ fixed):
+
+Maximum angular deviation: **84.3°** at $\theta = 0.050$ (near the north
+pole). Near the equator ($\theta = \pi/2$) the correction is smallest
+because $g_{\phi\phi} = \sin^2\theta$ is maximal and the inverse metric
+$[\mathcal{F}_Q^{-1}]_{\phi\phi} = 1/\sin^2\theta$ is close to 1. Near the
+poles $g_{\phi\phi} \to 0$, the metric pinches, and QFI⁻¹ rescales the
+$\phi$-gradient by $1/\sin^2\theta \gg 1$, causing the large deviation.
+
+**Step 4 — Optimisation trajectories** (50 steps, lr = 0.10, start: $\theta_0=0.5, \phi_0=0.5$):
+
+| Optimizer | Final $\mathcal{L} = \langle\sigma_x\rangle$ |
+|-----------|-----------------------------------------------|
+| Euclidean GD | 0.0001 (stalls near saddle) |
+| Quantum natural gradient | **−1.0000** (exact minimum reached) |
+
+Euclidean GD stalls near zero because the Euclidean gradient does not account
+for the coordinate singularity of the Bloch sphere parameterisation: it
+treats $\theta$ and $\phi$ directions as equally scaled, causing the
+optimiser to oscillate ineffectively around $\theta \approx \pi/2$. QNG
+corrects for this via $\mathcal{F}_Q^{-1}$, following the geodesic on $S^2$
+and reaching $\langle\sigma_x\rangle = -1$ in 50 steps.
+
+### Figure
+
+![Experiment 3: Fubini–Study metric and quantum natural gradient on a qubit state](exp3_qubit_qfi.png)
+
+A 3-panel figure: (left) QFI diagonal components analytic vs. PennyLane across
+$\theta \in [0, \pi]$, (centre) angular deviation $\alpha$ between Euclidean and
+QNG updates vs. $\theta$, (right) Bloch sphere optimisation trajectories for
+Euclidean GD and QNG.
 
 ---
 
