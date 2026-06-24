@@ -226,15 +226,22 @@ import torch.nn.functional as Fnn
 torch.manual_seed(42)
 
 D_HIDDEN    = 16
-N_STEPS_MLP = 50
+N_STEPS_MLP = 500
 LR_SGD_MLP  = 0.10
 LR_NG_MLP   = 0.10
 LR_ADAM_MLP = 0.01
-LAMBDA_MLP  = 1e-4   # Tikhonov regularisation for F̂⁻¹
+# Damping for (F̂ + λI)⁻¹. With κ ≈ 10⁹ and λ=1e-4 the regularised
+# condition number is ~7700 → effective lr up to 1000 → divergence.
+# λ=1e-2 caps κ_reg ≈ 77 (max amplification ×100, effective lr ≤ 10).
+LAMBDA_MLP  = 1e-2
 
-# X is already defined (N×D, standardised, no bias column)
-X_t = torch.tensor(X, dtype=torch.float32)
-y_t = torch.tensor(y, dtype=torch.float32)
+# 80/20 train/test split of the N=200 standardised samples.
+N_TRAIN = int(0.8 * N)   # 160 training, 40 test
+X_t     = torch.tensor(X[:N_TRAIN], dtype=torch.float32)
+y_t     = torch.tensor(y[:N_TRAIN], dtype=torch.float32)
+X_t_tst = torch.tensor(X[N_TRAIN:], dtype=torch.float32)
+y_t_tst = torch.tensor(y[N_TRAIN:], dtype=torch.float32)
+print(f"Train: {N_TRAIN} samples  |  Test: {N - N_TRAIN} samples")
 
 
 class MLP(nn.Module):
@@ -286,6 +293,16 @@ def acc_mlp(model: MLP) -> float:
         return float(((model(X_t) >= 0.5) == y_t.bool()).float().mean())
 
 
+def bce_mlp_tst(model: MLP) -> float:
+    with torch.no_grad():
+        return Fnn.binary_cross_entropy(model(X_t_tst), y_t_tst).item()
+
+
+def acc_mlp_tst(model: MLP) -> float:
+    with torch.no_grad():
+        return float(((model(X_t_tst) >= 0.5) == y_t_tst.bool()).float().mean())
+
+
 def empirical_fisher_mlp(model: MLP) -> np.ndarray:
     """Exact empirical Fisher via per-sample gradient outer products."""
     F_mat = np.zeros((N_PARAMS_MLP, N_PARAMS_MLP))
@@ -298,7 +315,7 @@ def empirical_fisher_mlp(model: MLP) -> np.ndarray:
         g = _flat_grad(model)
         F_mat += np.outer(g, g)
     model.train()
-    return F_mat / N
+    return F_mat / N_TRAIN
 
 
 def _apply_ng_step(model: MLP, ng: np.ndarray, lr: float):
@@ -316,25 +333,29 @@ def _apply_ng_step(model: MLP, ng: np.ndarray, lr: float):
 def train_mlp_sgd(lr: float) -> tuple:
     model = make_mlp()
     opt   = torch.optim.SGD(model.parameters(), lr=lr)
-    losses, accs = [], []
+    losses, accs, tst_losses, tst_accs = [], [], [], []
     for _ in range(N_STEPS_MLP):
         model.zero_grad()
         loss = bce_mlp(model)
         losses.append(loss.item())
         accs.append(acc_mlp(model))
+        tst_losses.append(bce_mlp_tst(model))
+        tst_accs.append(acc_mlp_tst(model))
         loss.backward()
         opt.step()
-    return model, np.array(losses), np.array(accs)
+    return model, np.array(losses), np.array(accs), np.array(tst_losses), np.array(tst_accs)
 
 
 def train_mlp_ng(lr: float) -> tuple:
     model  = make_mlp()
-    losses, accs, angles = [], [], []
+    losses, accs, angles, tst_losses, tst_accs = [], [], [], [], []
     for _ in range(N_STEPS_MLP):
         model.zero_grad()
         loss = bce_mlp(model)
         losses.append(loss.item())
         accs.append(acc_mlp(model))
+        tst_losses.append(bce_mlp_tst(model))
+        tst_accs.append(acc_mlp_tst(model))
         loss.backward()
         g      = _flat_grad(model)
         F_mat  = empirical_fisher_mlp(model)
@@ -343,30 +364,33 @@ def train_mlp_ng(lr: float) -> tuple:
         cos_a  = np.dot(g, ng) / (np.linalg.norm(g) * np.linalg.norm(ng) + 1e-15)
         angles.append(float(np.degrees(np.arccos(np.clip(cos_a, -1.0, 1.0)))))
         _apply_ng_step(model, ng, lr)
-    return model, np.array(losses), np.array(accs), np.array(angles)
+    return (model, np.array(losses), np.array(accs), np.array(angles),
+            np.array(tst_losses), np.array(tst_accs))
 
 
 def train_mlp_adam(lr: float) -> tuple:
     model = make_mlp()
     opt   = torch.optim.Adam(model.parameters(), lr=lr)
-    losses, accs = [], []
+    losses, accs, tst_losses, tst_accs = [], [], [], []
     for _ in range(N_STEPS_MLP):
         model.zero_grad()
         loss = bce_mlp(model)
         losses.append(loss.item())
         accs.append(acc_mlp(model))
+        tst_losses.append(bce_mlp_tst(model))
+        tst_accs.append(acc_mlp_tst(model))
         loss.backward()
         opt.step()
-    return model, np.array(losses), np.array(accs)
+    return model, np.array(losses), np.array(accs), np.array(tst_losses), np.array(tst_accs)
 
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 print("Training MLP — SGD …")
-mlp_sgd,  mlp_losses_sgd,  mlp_accs_sgd             = train_mlp_sgd(LR_SGD_MLP)
+mlp_sgd,  mlp_losses_sgd,  mlp_accs_sgd,  mlp_tst_losses_sgd,  mlp_tst_accs_sgd  = train_mlp_sgd(LR_SGD_MLP)
 print("Training MLP — natural gradient …")
-mlp_ng,   mlp_losses_ng,   mlp_accs_ng,  mlp_angles = train_mlp_ng(LR_NG_MLP)
+mlp_ng,   mlp_losses_ng,   mlp_accs_ng,   mlp_angles, mlp_tst_losses_ng,   mlp_tst_accs_ng   = train_mlp_ng(LR_NG_MLP)
 print("Training MLP — Adam …")
-mlp_adam, mlp_losses_adam, mlp_accs_adam             = train_mlp_adam(LR_ADAM_MLP)
+mlp_adam, mlp_losses_adam, mlp_accs_adam, mlp_tst_losses_adam, mlp_tst_accs_adam = train_mlp_adam(LR_ADAM_MLP)
 
 # ── Fisher summary at init and convergence ────────────────────────────────────
 mlp_init_model = make_mlp()
@@ -379,10 +403,14 @@ for label, F_np in [("init", F_init_mlp), ("SGD final", F_conv_mlp)]:
     print(f"MLP Fisher @ {label}: tr={np.trace(F_np):.4f}, "
           f"κ={kappa:.2e}, top-2 eigs={eig[-2]:.6f}, {eig[-1]:.6f}")
 
-print(f"MLP final losses  — SGD: {mlp_losses_sgd[-1]:.4f}, "
+print(f"\nMLP train losses  — SGD: {mlp_losses_sgd[-1]:.4f}, "
       f"NG: {mlp_losses_ng[-1]:.4f}, Adam: {mlp_losses_adam[-1]:.4f}")
-print(f"MLP final accuracy— SGD: {mlp_accs_sgd[-1]:.3f}, "
+print(f"MLP test  losses  — SGD: {mlp_tst_losses_sgd[-1]:.4f}, "
+      f"NG: {mlp_tst_losses_ng[-1]:.4f}, Adam: {mlp_tst_losses_adam[-1]:.4f}")
+print(f"MLP train accuracy— SGD: {mlp_accs_sgd[-1]:.3f}, "
       f"NG: {mlp_accs_ng[-1]:.3f}, Adam: {mlp_accs_adam[-1]:.3f}")
+print(f"MLP test  accuracy— SGD: {mlp_tst_accs_sgd[-1]:.3f}, "
+      f"NG: {mlp_tst_accs_ng[-1]:.3f}, Adam: {mlp_tst_accs_adam[-1]:.3f}")
 
 # ── Figure ────────────────────────────────────────────────────────────────────
 steps_mlp = np.arange(N_STEPS_MLP)
@@ -390,21 +418,23 @@ steps_mlp = np.arange(N_STEPS_MLP)
 fig_mlp, axes_mlp = plt.subplots(1, 3, figsize=(13, 4.5))
 fig_mlp.suptitle(
     f"Experiment 1b: Fisher information and natural gradient "
-    f"(MLP 2→{D_HIDDEN}→1, ReLU)",
+    f"(MLP 2→{D_HIDDEN}→1, ReLU, 500 steps)",
     fontsize=12,
 )
 
-# Loss curves
+# Loss curves — solid=train, dashed=test, same colour per optimiser
 ax = axes_mlp[0]
-ax.plot(steps_mlp, mlp_losses_sgd,  label="SGD",             color=PALETTE["sgd"])
-ax.plot(steps_mlp, mlp_losses_ng,   label="Natural gradient", color=PALETTE["ng"])
-ax.plot(steps_mlp, mlp_losses_adam, label="Adam",             color=PALETTE["adam"],
-        linestyle="--")
+ax.plot(steps_mlp, mlp_losses_sgd,      color=PALETTE["sgd"],  label="SGD train")
+ax.plot(steps_mlp, mlp_tst_losses_sgd,  color=PALETTE["sgd"],  linestyle="--", alpha=0.6, label="SGD test")
+ax.plot(steps_mlp, mlp_losses_ng,       color=PALETTE["ng"],   label="NG train")
+ax.plot(steps_mlp, mlp_tst_losses_ng,   color=PALETTE["ng"],   linestyle="--", alpha=0.6, label="NG test")
+ax.plot(steps_mlp, mlp_losses_adam,     color=PALETTE["adam"], label="Adam train")
+ax.plot(steps_mlp, mlp_tst_losses_adam, color=PALETTE["adam"], linestyle="--", alpha=0.6, label="Adam test")
 ax.set_xlabel("Step")
 ax.set_ylabel(r"$\mathcal{L}$")
-ax.set_title("Training loss")
+ax.set_title("Training & test loss (solid / dashed)")
 ax.set_yscale("log")
-ax.legend(fontsize=8)
+ax.legend(fontsize=7, ncol=2)
 
 # Angle α between SGD and NG update
 ax = axes_mlp[1]

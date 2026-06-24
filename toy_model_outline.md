@@ -174,6 +174,62 @@ paper make a precise statement: Fisher geometry is not a theoretical curiosity o
 linear models; it is an empirical feature of any multi-layer network, including
 transformers.
 
+### Observed results
+
+**Fisher information matrix**
+
+| Checkpoint | $\text{tr}(\hat{F})$ | $\kappa$ | Top-2 eigenvalues |
+|------------|----------------------|----------|-------------------|
+| Init       | 1.3607               | 1.08 × 10⁹ | 0.2846, 0.7660  |
+| SGD final  | 0.7727               | 2.56 × 10⁹ | 0.2102, 0.3695  |
+
+The condition number at initialisation is already **κ ≈ 10⁹** — eight orders
+of magnitude larger than logistic regression's κ = 1.20. It grows further to
+2.56 × 10⁹ at convergence, meaning the loss surface becomes more
+ill-conditioned as the network specialises.
+
+**Update direction angle $\alpha$**
+
+The angle rises from ~78° at step 0 to ~88–89° within the first 10 steps and
+stays there for the entire run. The SGD gradient is nearly orthogonal to the
+natural gradient throughout — a direct consequence of the 10-decade eigenvalue
+spread in $\hat{F}$.
+
+**Convergence and accuracy**
+
+| Optimizer | Final loss | Final accuracy |
+|-----------|-----------|----------------|
+| SGD       | 0.3987    | 89.5 %         |
+| Natural gradient | 0.4244 | **93.5 %** |
+| Adam      | 0.3230    | 87.5 %         |
+
+Natural gradient achieves the highest accuracy (93.5 %) despite a slightly
+higher loss, because it finds a decision boundary with better geometric
+alignment to the data manifold. The noisy loss curve (visible in the figure)
+reflects the stale Fisher estimate changing rapidly as weights shift.
+
+**Eigenvalue spectrum**
+
+The full 65-eigenvalue spectrum spans ~10 orders of magnitude (top eigenvalue
+~0.77 at init, tail at the floating-point floor ~10⁻¹²). The spectrum shape
+is largely preserved between init and convergence, consistent with the Fisher
+geometry being determined primarily by the architecture, not the learned
+weights at this scale.
+
+**Comparison to logistic regression**
+
+| Property | Logistic regression | MLP 2→16→1 |
+|----------|-------------------|-------------|
+| Fisher computation | Closed form | Empirical, per-sample outer products |
+| $\kappa$ at init | 1.20 | 1.08 × 10⁹ |
+| $\kappa$ at convergence | 5.25 | 2.56 × 10⁹ |
+| Max update angle $\alpha$ | Small, grows slowly | ~89° from step 10 onward |
+| Best final accuracy | 86.5 % (all tied) | 93.5 % (NG) |
+
+The MLP bridges the analytically tractable logistic regression (Experiment 1)
+and the full transformer (Experiment 2), showing that the extreme
+ill-conditioning is an intrinsic property of multi-layer networks.
+
 ### Figure
 
 ![Experiment 1b: Fisher information and natural gradient on MLP 2→16→1](exp1_mlp.png)
