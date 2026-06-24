@@ -138,16 +138,18 @@ eigenspectrum — that is directly analogous to transformer curvature.
 ### Setup
 
 - **Model**: MLP with architecture 2→16→1 (ReLU hidden, sigmoid output), 65 parameters.
-- **Dataset**: identical to Experiment 1 — 2D Gaussian blobs, $N = 200$ samples,
-  standardised features. Split 80/20 into 160 training and 40 test samples.
+- **Dataset**: 2D Gaussian blobs (`make_classification`, `random_state=42`),
+  $N = 10{,}000$ samples, standardised features. Split 80/20 into 8,000 training
+  and 2,000 test samples.
 - **Optimisers**: SGD, natural gradient (exact $\hat{F}^{-1}$ recomputed every step),
   Adam. All three use L2 weight decay $\lambda_{\text{wd}} = 10^{-3}$ for a fair,
   regularised comparison. For NG the decay enters the effective gradient:
   $g_{\text{eff}} = g_{\text{CE}} + \lambda_{\text{wd}}\,\theta$; the Fisher matrix
   is unchanged (it is the Fisher of the cross-entropy likelihood, not the regularised
   objective).
-- **Steps**: 500. Fisher recomputation per step is $O(N_{\text{train}} \cdot d^2)$;
-  feasible for $N_{\text{train}} = 160$, $d = 65$.
+- **Steps**: 1,000. Fisher recomputation per step is $O(N_{\text{train}} \cdot d^2)$;
+  feasible for $N_{\text{train}} = 8{,}000$, $d = 65$ on a single CPU core, though
+  computationally expensive (~8,000 backward passes per step).
 
 ### What to compute
 
@@ -182,83 +184,96 @@ transformers.
 
 **Fisher information matrix**
 
-| Checkpoint | $\text{tr}(\hat{F})$ | $\kappa$ | Top-2 eigenvalues |
-|------------|----------------------|----------|-------------------|
-| Init       | 1.3607               | 1.08 × 10⁹ | 0.2846, 0.7660  |
-| SGD final  | 1.1184               | 1.30 × 10⁹ | 0.2872, 0.5547  |
+The empirical Fisher is computed on the training split only
+($N_{\text{train}} = 8{,}000$), normalised by $N_{\text{train}}$.
 
-The condition number at initialisation is already **κ ≈ 10⁹** — eight orders
-of magnitude larger than logistic regression's κ = 1.20. It increases further
-to 1.30 × 10⁹ at convergence, meaning the loss surface becomes more
-ill-conditioned as the network specialises. Note that the empirical Fisher is
-computed on the training split only, normalised by $N_{\text{train}} = 160$.
+| Checkpoint | $\kappa$ (approx.) | Spectrum |
+|------------|--------------------|---------|
+| Init       | ~10⁹              | Top eigenvalue ~0.2, tail ~10⁻¹¹ |
+| SGD final  | ~10⁹              | Top eigenvalue shifts upward; tail unchanged |
 
-**Update direction angle $\alpha$**
+The condition number remains near **κ ≈ 10⁹** throughout, eight orders of
+magnitude larger than logistic regression (κ = 1.20). The spectrum spans
+~10 decades at both init and convergence, with the top few eigenvalues
+growing slightly as the model specialises. The heavy tail is structurally
+unchanged, confirming that extreme ill-conditioning is intrinsic to the
+architecture, not to the initialisation.
 
-The raw per-step angle oscillates between ~47° and ~65° throughout training —
-a consequence of the empirical Fisher being recomputed from a changing
-parameter vector at every step. The 25-step moving average (dashed line in
-the figure) stabilises at roughly **55°**, well above the 45° threshold, and
-shows a slight upward drift toward 58–62° as training progresses. This
-persistent deviation confirms that the natural gradient travels a
-qualitatively different path through parameter space than vanilla SGD:
-the two directions are consistently far from aligned, even though they
-ultimately reach similar loss values.
+**Update direction angle $\alpha$ — a decreasing trend**
+
+With 10,000 samples and 1,000 steps, the angle signal is stable enough to
+reveal a clear trend. The raw per-step angle starts near **72°** at
+initialisation and the 25-step moving average (dashed line in the figure)
+decreases monotonically to **~20–25°** by step 1,000.
+
+This decay has a precise geometric interpretation: at initialisation the
+gradient $g$ points in a direction that is approximately random relative to
+the Fisher eigenvectors, so $F^{-1}g$ rotates $g$ substantially. As training
+progresses the model learns to concentrate its gradient signal along the
+dominant curvature directions, and $F^{-1}g$ increasingly resembles a scalar
+rescaling of $g$ rather than a rotation. In other words, **the natural
+gradient's directional advantage is most pronounced early in training**, when
+the Euclidean gradient is most misaligned with the information-geometric
+landscape.
 
 **Convergence: training and test loss**
 
-With L2 regularisation ($\lambda_{\text{wd}} = 10^{-3}$), the three optimisers
-reach different training minima and exhibit different generalisation gaps:
+With $N = 10{,}000$ samples (8,000 train / 2,000 test) the sample-to-parameter
+ratio is ~123:1, effectively eliminating overfitting. Train and test losses
+track closely for all three optimisers:
 
 | Optimiser | Final train loss | Final test loss | Train-test gap |
 |-----------|-----------------|-----------------|----------------|
-| SGD       | ~0.265          | ~0.47           | ~0.20          |
-| Natural gradient | ~0.22    | ~0.60           | ~0.38          |
-| Adam      | ~0.245          | ~0.57           | ~0.33          |
+| SGD       | ~0.21           | ~0.23           | ~0.02          |
+| Natural gradient | ~0.21    | ~0.22           | ~0.01          |
+| Adam      | ~0.21           | ~0.21           | ~0.00          |
 
-NG achieves the **lowest training loss** because it exploits the loss
-landscape's curvature most aggressively, landing in a sharper minimum.
-The trade-off is a larger generalisation gap — a known consequence of
-curvature-aware methods converging to sharper basins (Hochreiter &
-Schmidhuber 1997). SGD's implicit noise acts as a regulariser, landing it
-in the flattest basin and giving the best test loss despite the worst
-training loss. Adam is intermediate in both dimensions. Light weight decay
-keeps all test losses from diverging, but cannot fully close the gap at
-this sample-to-parameter ratio (≈ 2.5 per parameter).
+All three converge to essentially the same loss by step 1,000. The
+key differentiator is **early-phase speed**: NG descends most steeply
+in the first ~100 steps, consistent with the large initial angle $\alpha$
+being exploited to take a more directed step. By the time $\alpha$ has
+decayed to ~25°, the three methods are nearly indistinguishable in
+both direction and magnitude.
 
 **Eigenvalue spectrum**
 
 The full 65-eigenvalue spectrum spans ~10 orders of magnitude (top eigenvalue
-~0.77 at init, tail near the floating-point floor ~10⁻¹²). The spectrum
-shape is largely preserved between init and convergence, consistent with the
-Fisher geometry being determined primarily by the architecture rather than
-the specific learned weights at this scale.
+~0.2, tail near the floating-point floor ~10⁻¹¹). The top ~5 eigenvalues
+shift upward at convergence while the bulk of the spectrum is unchanged,
+indicating that a small number of high-curvature directions sharpen as the
+model specialises — directly analogous to the dominant K-FAC blocks observed
+in transformers.
 
 **Comparison to logistic regression**
 
 | Property | Logistic regression | MLP 2→16→1 |
 |----------|-------------------|-------------|
 | Fisher computation | Closed form | Empirical, per-sample outer products |
-| $\kappa$ at init | 1.20 | 1.08 × 10⁹ |
-| $\kappa$ at convergence | 5.25 | 1.30 × 10⁹ |
-| Update angle $\alpha$ (smoothed) | Small, grows slowly to ~10° | Stable ~55°, 10× larger |
-| Best final train loss | 0.343 (all tied) | ~0.22 (NG) |
+| $\kappa$ at init | 1.20 | ~10⁹ |
+| $\kappa$ at convergence | 5.25 | ~10⁹ |
+| Update angle $\alpha$ (smoothed) | Small, grows slowly | Starts ~72°, decays to ~20° |
+| Final train-test gap | 0 % (all tied, simple problem) | < 2 % (8,000 samples) |
 
-The MLP bridges the analytically tractable logistic regression (Experiment 1)
-and the full transformer (Experiment 2), showing that extreme
-ill-conditioning is an intrinsic property of multi-layer networks, not an
-artefact of scale.
+The decreasing angle profile of the MLP is the experiment's most
+informative output: it shows that the benefit of information-geometric
+curvature correction is concentrated at the beginning of training, precisely
+where gradient estimates are least aligned with the true parameter manifold.
+This directly motivates the use of Fisher-informed optimisers (K-FAC, Shampoo,
+SOAP) in the early training phase of large language models.
 
 ### Figure
 
 ![Experiment 1b: Fisher information and natural gradient on MLP 2→16→1](exp1_mlp.png)
 
 A 3-panel figure: (left) training loss (solid) and test loss (dashed) for SGD,
-NG, and Adam over 500 steps — same colour per optimiser; (centre) raw per-step
-angle $\alpha$ between the SGD and NG update directions (faint), overlaid with a
-25-step moving average (bold dashed) to reveal the underlying trend; (right)
-full 65-eigenvalue spectrum of $\hat{F}$ at init and at SGD convergence on a
-log scale, showing the ~10-decade heavy tail.
+NG, and Adam over 1,000 steps — same colour per optimiser; train and test tracks
+are nearly coincident, confirming negligible overfitting at $N = 10{,}000$;
+(centre) raw per-step angle $\alpha$ between the SGD and NG update directions
+(faint), overlaid with a 25-step moving average (bold dashed), revealing a clear
+monotonic decrease from ~72° at init to ~20° at convergence; (right) full
+65-eigenvalue spectrum of $\hat{F}$ at init and at SGD convergence on a log
+scale, showing the ~10-decade heavy tail and a modest upward shift in the top
+eigenvalues at convergence.
 
 ---
 
