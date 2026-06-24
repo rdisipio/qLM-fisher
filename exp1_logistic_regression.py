@@ -208,3 +208,228 @@ plt.tight_layout()
 out = "exp1_logistic_regression.png"
 plt.savefig(out, dpi=300, bbox_inches="tight")
 print(f"Saved {out}")
+
+# =============================================================================
+# Experiment 1b — MLP (2→16→1, ReLU): empirical Fisher via per-sample gradients
+#
+# Logistic regression admits a closed-form Fisher; neural networks do not.
+# Here we compute the exact empirical Fisher
+#   F̂(θ) = (1/N) Σ_i ∇_θ L_i · ∇_θ L_i^T
+# via per-sample backward passes and compare natural gradient to SGD/Adam
+# on the same dataset, showing that the Fisher geometry is richer (higher κ,
+# heavier-tailed spectrum) in even the smallest MLP.
+# =============================================================================
+import torch
+import torch.nn as nn
+import torch.nn.functional as Fnn
+
+torch.manual_seed(42)
+
+D_HIDDEN    = 16
+N_STEPS_MLP = 50
+LR_SGD_MLP  = 0.10
+LR_NG_MLP   = 0.10
+LR_ADAM_MLP = 0.01
+LAMBDA_MLP  = 1e-4   # Tikhonov regularisation for F̂⁻¹
+
+# X is already defined (N×D, standardised, no bias column)
+X_t = torch.tensor(X, dtype=torch.float32)
+y_t = torch.tensor(y, dtype=torch.float32)
+
+
+class MLP(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(D, D_HIDDEN)
+        self.fc2 = nn.Linear(D_HIDDEN, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.sigmoid(self.fc2(Fnn.relu(self.fc1(x)))).squeeze(-1)
+
+
+N_PARAMS_MLP = sum(p.numel() for p in MLP().parameters())
+# For D=2, D_HIDDEN=16: (2×16+16) + (16×1+1) = 48 + 17 = 65
+print(f"\nMLP (2→{D_HIDDEN}→1) parameters: {N_PARAMS_MLP}")
+
+
+def _init_mlp() -> MLP:
+    """Fixed initialisation so all three optimisers start identically."""
+    torch.manual_seed(42)
+    m = MLP()
+    nn.init.xavier_uniform_(m.fc1.weight)
+    nn.init.zeros_(m.fc1.bias)
+    nn.init.xavier_uniform_(m.fc2.weight)
+    nn.init.zeros_(m.fc2.bias)
+    return m
+
+
+_INIT_STATE = _init_mlp().state_dict()
+
+
+def make_mlp() -> MLP:
+    m = MLP()
+    m.load_state_dict(_INIT_STATE)
+    return m
+
+
+def _flat_grad(model: MLP) -> np.ndarray:
+    return np.concatenate([p.grad.detach().numpy().ravel()
+                           for p in model.parameters()])
+
+
+def bce_mlp(model: MLP) -> torch.Tensor:
+    return Fnn.binary_cross_entropy(model(X_t), y_t)
+
+
+def acc_mlp(model: MLP) -> float:
+    with torch.no_grad():
+        return float(((model(X_t) >= 0.5) == y_t.bool()).float().mean())
+
+
+def empirical_fisher_mlp(model: MLP) -> np.ndarray:
+    """Exact empirical Fisher via per-sample gradient outer products."""
+    F_mat = np.zeros((N_PARAMS_MLP, N_PARAMS_MLP))
+    model.eval()
+    for xi, yi in zip(X_t, y_t):
+        model.zero_grad()
+        Fnn.binary_cross_entropy(
+            model(xi.unsqueeze(0)), yi.unsqueeze(0)
+        ).backward()
+        g = _flat_grad(model)
+        F_mat += np.outer(g, g)
+    model.train()
+    return F_mat / N
+
+
+def _apply_ng_step(model: MLP, ng: np.ndarray, lr: float):
+    with torch.no_grad():
+        off = 0
+        for p in model.parameters():
+            n = p.numel()
+            p.data -= lr * torch.from_numpy(
+                ng[off : off + n].reshape(p.shape)).to(dtype=p.dtype)
+            off += n
+
+
+# ── MLP trainers ──────────────────────────────────────────────────────────────
+
+def train_mlp_sgd(lr: float) -> tuple:
+    model = make_mlp()
+    opt   = torch.optim.SGD(model.parameters(), lr=lr)
+    losses, accs = [], []
+    for _ in range(N_STEPS_MLP):
+        model.zero_grad()
+        loss = bce_mlp(model)
+        losses.append(loss.item())
+        accs.append(acc_mlp(model))
+        loss.backward()
+        opt.step()
+    return model, np.array(losses), np.array(accs)
+
+
+def train_mlp_ng(lr: float) -> tuple:
+    model  = make_mlp()
+    losses, accs, angles = [], [], []
+    for _ in range(N_STEPS_MLP):
+        model.zero_grad()
+        loss = bce_mlp(model)
+        losses.append(loss.item())
+        accs.append(acc_mlp(model))
+        loss.backward()
+        g      = _flat_grad(model)
+        F_mat  = empirical_fisher_mlp(model)
+        F_reg  = F_mat + LAMBDA_MLP * np.eye(N_PARAMS_MLP)
+        ng     = np.linalg.solve(F_reg, g)
+        cos_a  = np.dot(g, ng) / (np.linalg.norm(g) * np.linalg.norm(ng) + 1e-15)
+        angles.append(float(np.degrees(np.arccos(np.clip(cos_a, -1.0, 1.0)))))
+        _apply_ng_step(model, ng, lr)
+    return model, np.array(losses), np.array(accs), np.array(angles)
+
+
+def train_mlp_adam(lr: float) -> tuple:
+    model = make_mlp()
+    opt   = torch.optim.Adam(model.parameters(), lr=lr)
+    losses, accs = [], []
+    for _ in range(N_STEPS_MLP):
+        model.zero_grad()
+        loss = bce_mlp(model)
+        losses.append(loss.item())
+        accs.append(acc_mlp(model))
+        loss.backward()
+        opt.step()
+    return model, np.array(losses), np.array(accs)
+
+
+# ── Run ───────────────────────────────────────────────────────────────────────
+print("Training MLP — SGD …")
+mlp_sgd,  mlp_losses_sgd,  mlp_accs_sgd             = train_mlp_sgd(LR_SGD_MLP)
+print("Training MLP — natural gradient …")
+mlp_ng,   mlp_losses_ng,   mlp_accs_ng,  mlp_angles = train_mlp_ng(LR_NG_MLP)
+print("Training MLP — Adam …")
+mlp_adam, mlp_losses_adam, mlp_accs_adam             = train_mlp_adam(LR_ADAM_MLP)
+
+# ── Fisher summary at init and convergence ────────────────────────────────────
+mlp_init_model = make_mlp()
+F_init_mlp = empirical_fisher_mlp(mlp_init_model)
+F_conv_mlp = empirical_fisher_mlp(mlp_sgd)
+
+for label, F_np in [("init", F_init_mlp), ("SGD final", F_conv_mlp)]:
+    eig   = np.linalg.eigvalsh(F_np)
+    kappa = eig[-1] / (max(abs(eig[0]), 1e-15))
+    print(f"MLP Fisher @ {label}: tr={np.trace(F_np):.4f}, "
+          f"κ={kappa:.2e}, top-2 eigs={eig[-2]:.6f}, {eig[-1]:.6f}")
+
+print(f"MLP final losses  — SGD: {mlp_losses_sgd[-1]:.4f}, "
+      f"NG: {mlp_losses_ng[-1]:.4f}, Adam: {mlp_losses_adam[-1]:.4f}")
+print(f"MLP final accuracy— SGD: {mlp_accs_sgd[-1]:.3f}, "
+      f"NG: {mlp_accs_ng[-1]:.3f}, Adam: {mlp_accs_adam[-1]:.3f}")
+
+# ── Figure ────────────────────────────────────────────────────────────────────
+steps_mlp = np.arange(N_STEPS_MLP)
+
+fig_mlp, axes_mlp = plt.subplots(1, 3, figsize=(13, 4.5))
+fig_mlp.suptitle(
+    f"Experiment 1b: Fisher information and natural gradient "
+    f"(MLP 2→{D_HIDDEN}→1, ReLU)",
+    fontsize=12,
+)
+
+# Loss curves
+ax = axes_mlp[0]
+ax.plot(steps_mlp, mlp_losses_sgd,  label="SGD",             color=PALETTE["sgd"])
+ax.plot(steps_mlp, mlp_losses_ng,   label="Natural gradient", color=PALETTE["ng"])
+ax.plot(steps_mlp, mlp_losses_adam, label="Adam",             color=PALETTE["adam"],
+        linestyle="--")
+ax.set_xlabel("Step")
+ax.set_ylabel(r"$\mathcal{L}$")
+ax.set_title("Training loss")
+ax.set_yscale("log")
+ax.legend(fontsize=8)
+
+# Angle α between SGD and NG update
+ax = axes_mlp[1]
+ax.plot(steps_mlp, mlp_angles, color=PALETTE["misc"])
+ax.axhline(45, color="gray", linestyle=":", linewidth=0.8, label=r"$45°$")
+ax.set_xlabel("Step")
+ax.set_ylabel(r"$\alpha$ (degrees)")
+ax.set_title(r"Angle between SGD and NG update, $\alpha$")
+ax.legend(fontsize=8)
+
+# Full eigenvalue spectrum (sorted descending, log scale)
+ax = axes_mlp[2]
+eig_init_mlp = np.sort(np.linalg.eigvalsh(F_init_mlp))[::-1]
+eig_conv_mlp = np.sort(np.linalg.eigvalsh(F_conv_mlp))[::-1]
+idx = np.arange(1, N_PARAMS_MLP + 1)
+ax.semilogy(idx, np.clip(eig_init_mlp, 1e-12, None), "o-", markersize=3,
+            color=PALETTE["sgd"], label="Init")
+ax.semilogy(idx, np.clip(eig_conv_mlp, 1e-12, None), "s-", markersize=3,
+            color=PALETTE["ng"],  label="Convergence (SGD)")
+ax.set_xlabel("Eigenvalue index (sorted descending)")
+ax.set_ylabel(r"$\lambda$")
+ax.set_title(r"Fisher eigenvalue spectrum $\lambda(\hat{F})$")
+ax.legend(fontsize=8)
+
+plt.tight_layout()
+out_mlp = "exp1_mlp.png"
+plt.savefig(out_mlp, dpi=300, bbox_inches="tight")
+print(f"Saved {out_mlp}")

@@ -11,7 +11,8 @@ paper.
 
 | # | Experiment | Addresses | Estimated effort |
 |---|------------|-----------|-----------------|
-| 1 | Fisher computation + natural gradient vs SGD on logistic regression | R1 (toy worked example) | Low |
+| 1 | Fisher computation + natural gradient vs SGD on logistic regression (closed-form) | R1 (toy worked example) | Low |
+| 1b | Same comparison on a 2→16→1 MLP (empirical Fisher via per-sample gradients) | R1 (neural-network bridge to Exp 2) | Low |
 | 2 | Empirical Fisher / K-FAC summary scalars on a small transformer | R1 (LLM-relevant approximation) | Medium |
 | 3 | QFI toy computation on a parameterized qubit state | R1 + R2 (quantum claim grounding) | Low–Medium |
 
@@ -120,6 +121,66 @@ non-Euclidean Fisher metric.
 A 2×2 panel: (top-left) loss curves, (top-right) update direction angle
 $\alpha$ vs. training step, (bottom-left) Fisher eigenvalue spectrum at
 init vs. convergence, (bottom-right) decision boundary comparison.
+
+---
+
+## Experiment 1b — MLP (2→16→1) Fisher and natural gradient
+
+### Purpose
+Logistic regression admits a closed-form Fisher because the output distribution
+is Bernoulli with a single variance scalar per sample. Neural networks do not:
+each per-sample log-likelihood gradient has a different direction, so the Fisher
+must be assembled from outer products. This experiment uses the same dataset and
+optimisers as Experiment 1 but replaces the linear model with a 2-layer MLP,
+yielding a much richer Fisher geometry — higher condition number, heavier-tailed
+eigenspectrum — that is directly analogous to transformer curvature.
+
+### Setup
+
+- **Model**: MLP with architecture 2→16→1 (ReLU hidden, sigmoid output), 65 parameters.
+- **Dataset**: identical to Experiment 1 — 2D Gaussian blobs, $N = 200$ samples,
+  standardised features.
+- **Optimisers**: SGD, natural gradient (exact $\hat{F}^{-1}$ recomputed every step),
+  Adam.
+- **Steps**: 50 (Fisher recomputation per step is $O(N \cdot d^2)$; feasible for
+  $N = 200$, $d = 65$).
+
+### What to compute
+
+**Empirical Fisher via per-sample gradients**
+
+$$\hat{F}(\theta) = \frac{1}{N} \sum_{i=1}^{N} \nabla_\theta \mathcal{L}_i \, \nabla_\theta \mathcal{L}_i^\top$$
+
+Computed by looping over all $N = 200$ samples, running one backward pass each,
+and accumulating outer products of the flattened parameter gradient. At 65
+parameters this yields a $65 \times 65$ matrix — small enough to invert exactly.
+
+**Same summary statistics as Experiment 1**: $\text{tr}(\hat{F})$, $\kappa$, top
+eigenvalues. **Full spectrum plot** (all 65 eigenvalues sorted descending on a
+log scale) replaces the bar chart used for logistic regression's 3 eigenvalues,
+making the heavy tail visible.
+
+### Expected results and paper connection
+
+The MLP Fisher is expected to have a much larger condition number than logistic
+regression ($\kappa \gg 5$), with many near-zero eigenvalues and a few dominant
+ones — a power-law-like spectrum. This pattern is known to grow more pronounced
+with network depth and width, and is the same phenomenon observed in full
+transformers (Experiment 2). Natural gradient, which inverts this spectrum, should
+converge noticeably faster than SGD on the same task.
+
+The two-experiment comparison (closed-form LR vs. empirical-Fisher MLP) lets the
+paper make a precise statement: Fisher geometry is not a theoretical curiosity of
+linear models; it is an empirical feature of any multi-layer network, including
+transformers.
+
+### Figure
+
+![Experiment 1b: Fisher information and natural gradient on MLP 2→16→1](exp1_mlp.png)
+
+A 3-panel figure: (left) loss curves for SGD, NG, Adam; (centre) update direction
+angle $\alpha$ between SGD and NG at each step; (right) full eigenvalue spectrum of
+$\hat{F}$ at init vs. convergence on a log scale.
 
 ---
 
