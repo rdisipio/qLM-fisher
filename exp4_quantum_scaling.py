@@ -53,7 +53,7 @@ torch.manual_seed(42)
 N_SAMPLES  = 2000
 N_FEATURES = 2
 N_STEPS_C  = 800    # classical training steps (full-batch)
-N_STEPS_Q  = 2000   # quantum training steps   (mini-batch)
+N_STEPS_Q  = 500    # quantum training steps   (ZZ readout converges faster)
 LR_C       = 5e-3   # classical learning rate
 LR_Q       = 0.01   # quantum learning rate
 BATCH_Q    = 64     # larger batch → stabler gradients through the Python loop
@@ -151,8 +151,15 @@ def make_quantum_model(n_qubits):
       CNOT(i, i+1)  for i in range(n_qubits-1) <- entanglement
 
     Number of circuit parameters: N_Q_LAYERS x n_qubits x 2
+    Readout size: n + n*(n-1)/2  (Z singles + ZZ pairs)
     """
     dev = qml.device("default.qubit", wires=n_qubits)
+
+    # Output size: n single-qubit Z's + n*(n-1)/2 two-qubit ZZ correlations.
+    # The ZZ terms encode entanglement directly and give the linear readout
+    # enough features to learn non-linear decision boundaries.
+    n_pairs   = n_qubits * (n_qubits - 1) // 2
+    n_readout = n_qubits + n_pairs
 
     @qml.qnode(dev, interface="torch", diff_method="backprop")
     def circuit(inputs, weights):
@@ -167,21 +174,26 @@ def make_quantum_model(n_qubits):
             # Linear entanglement
             for i in range(n_qubits - 1):
                 qml.CNOT(wires=[i, i + 1])
-        return tuple(qml.expval(qml.PauliZ(i)) for i in range(n_qubits))
+        # Single-qubit Z measurements
+        singles = [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
+        # Two-qubit ZZ correlations: capture entanglement structure
+        pairs = [qml.expval(qml.PauliZ(i) @ qml.PauliZ(j))
+                 for i in range(n_qubits) for j in range(i + 1, n_qubits)]
+        return tuple(singles + pairs)
 
     class QuantumHybrid(nn.Module):
         def __init__(self):
             super().__init__()
             self.weights = nn.Parameter(torch.zeros(N_Q_LAYERS, n_qubits, 2))
             nn.init.uniform_(self.weights, -np.pi / 4, np.pi / 4)
-            self.linear = nn.Linear(n_qubits, 1)
+            self.linear = nn.Linear(n_readout, 1)
 
         def forward(self, x):
             q_outs = []
             for xi in x:
                 raw = circuit(xi, self.weights)
                 q_outs.append(torch.stack(list(raw)))
-            q_out = torch.stack(q_outs).float()   # (batch, n_qubits)
+            q_out = torch.stack(q_outs).float()   # (batch, n_readout)
             return torch.sigmoid(self.linear(q_out)).squeeze(-1)
 
     return QuantumHybrid()
@@ -244,20 +256,21 @@ def compute_qfi(weights_np, n_qubits, eps=1e-4):
 
 def run_quantum(n_qubits):
     torch.manual_seed(42)
-    print(f"  Quantum n_qubits={n_qubits}…")
+    print(f"  Quantum n_qubits={n_qubits}…", flush=True)
     model = make_quantum_model(n_qubits)
 
     # ── QFI at INITIALISATION (before any gradient steps) ──────────────────
     # At init the circuit weights are random in [-π/4, π/4].  Because the
     # variational gates are not near identity and the entanglement is generic,
     # the Fubini–Study metric is near-isotropic here.
-    print(f"    Computing QFI at initialisation…")
+    print(f"    Computing QFI at initialisation…", flush=True)
     w_init = model.weights.detach().cpu().numpy()
     qfi_init = compute_qfi(w_init, n_qubits)
     tr_qi, kappa_i, eig_qi = fisher_stats(qfi_init)
     print(f"    κ(QFI) at init = {kappa_i:.2e}")
 
     opt   = torch.optim.Adam(model.parameters(), lr=LR_Q)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=N_STEPS_Q, eta_min=1e-4)
     losses = []
     for step in range(N_STEPS_Q):
         idx = np.random.choice(N_TRAIN, BATCH_Q, replace=False)
@@ -265,9 +278,10 @@ def run_quantum(n_qubits):
         l = F.binary_cross_entropy(model(X_tr[idx]), y_tr[idx])
         l.backward()
         opt.step()
+        sched.step()
         losses.append(l.item())
-        if step % 250 == 0:
-            print(f"    step {step:4d}  loss={l.item():.4f}")
+        if step % 100 == 0:
+            print(f"    step {step:4d}  loss={l.item():.4f}  lr={sched.get_last_lr()[0]:.5f}", flush=True)
 
     with torch.no_grad():
         tl_sum = 0.0
@@ -284,7 +298,7 @@ def run_quantum(n_qubits):
     h_dim  = 2 ** n_qubits                 # Hilbert space dimension
 
     # ── QFI at CONVERGENCE ──────────────────────────────────────────────────
-    print(f"    Computing QFI at convergence (n_circuit_params={n_circ})…")
+    print(f"    Computing QFI at convergence (n_circuit_params={n_circ})…", flush=True)
     w_np       = model.weights.detach().cpu().numpy()
     qfi_conv   = compute_qfi(w_np, n_qubits)
     tr_qc, kappa_c, eig_qc = fisher_stats(qfi_conv)
@@ -300,16 +314,233 @@ def run_quantum(n_qubits):
     )
 
 
+def run_quantum_qng(n_qubits):
+    """
+    QNG training: quantum circuit params updated with F_Q^{-1} preconditioning,
+    linear readout updated with standard Adam.
+
+    QNG update:  Δθ_circ = −η · (G + ε I)^{-1} · ∇_circ L
+    Linear:      standard Adam step
+
+    G is PennyLane's block-diagonal Fubini-Study metric tensor, computed via
+    parameter-shift on the FULL data-encoding circuit at one batch sample.
+    This is the correct metric for QNG (κ ≈ 3–5 vs κ ~ 10^12 for the
+    variational-only QFI).  Recomputed every QFI_K steps (≈13 ms, negligible).
+    """
+    torch.manual_seed(42)
+    np.random.seed(42)
+    print(f"  QNG n_qubits={n_qubits}…", flush=True)
+
+    model  = make_quantum_model(n_qubits)
+    n_circ = model.weights.numel()
+
+    # PL QNode for metric tensor: full data-encoding circuit, parameter-shift
+    dev_mt = qml.device("default.qubit", wires=n_qubits)
+
+    @qml.qnode(dev_mt, diff_method="parameter-shift")
+    def vqc_state(weights, inputs):
+        for layer in range(N_Q_LAYERS):
+            for i in range(n_qubits):
+                qml.RY(inputs[i % N_FEATURES] * pnp.pi, wires=i)
+            for i in range(n_qubits):
+                qml.RX(weights[layer, i, 0], wires=i)
+                qml.RZ(weights[layer, i, 1], wires=i)
+            for i in range(n_qubits - 1):
+                qml.CNOT(wires=[i, i + 1])
+        return qml.state()
+
+    # Separate Adam for the linear readout (no quantum geometry)
+    opt_lin = torch.optim.Adam(model.linear.parameters(), lr=LR_Q)
+
+    LR_QNG  = 0.005   # slightly higher than Adam: metric is well-conditioned (κ≈5)
+    QFI_REG = 0.01    # Tikhonov ε: min eigenvalue ≈ 0.07, so ε adds 14% floor
+    QFI_K   = 25      # steps between metric tensor recomputations
+
+    mt_inv = np.eye(n_circ)  # start with identity (no preconditioning at step 0)
+
+    losses = []
+    for step in range(N_STEPS_Q):
+        # Recompute metric tensor every QFI_K steps on one random training sample
+        if step % QFI_K == 0:
+            w_np = model.weights.detach().cpu().numpy()
+            i_s  = np.random.randint(N_TRAIN)
+            w_pl = pnp.array(w_np, requires_grad=True)
+            x_pl = pnp.array(X_tr_np[i_s], requires_grad=False)
+            mt_raw = qml.metric_tensor(vqc_state, approx="block-diag")(w_pl, x_pl)
+            mt_2d  = np.array(mt_raw).reshape(n_circ, n_circ)
+            mt_inv = np.linalg.inv(mt_2d + QFI_REG * np.eye(n_circ))
+
+        idx = np.random.choice(N_TRAIN, BATCH_Q, replace=False)
+        model.zero_grad()
+        l = F.binary_cross_entropy(model(X_tr[idx]), y_tr[idx])
+        l.backward()
+
+        # QNG step for circuit weights
+        if model.weights.grad is not None:
+            g = model.weights.grad.detach().cpu().numpy().ravel()
+            delta = (mt_inv @ g).reshape(model.weights.shape)
+            with torch.no_grad():
+                model.weights -= LR_QNG * torch.tensor(delta, dtype=torch.float32)
+            model.weights.grad = None
+
+        # Adam step for linear layer
+        opt_lin.step()
+
+        losses.append(l.item())
+        if step % 100 == 0:
+            print(f"    [QNG] step {step:4d}  loss={l.item():.4f}", flush=True)
+
+    with torch.no_grad():
+        tl_sum, preds = 0.0, []
+        for i in range(0, len(X_te), 128):
+            o = model(X_te[i:i+128])
+            tl_sum += F.binary_cross_entropy(o, y_te[i:i+128]).item() * len(X_te[i:i+128])
+            preds.append((o >= 0.5).cpu())
+        test_loss = tl_sum / len(y_te)
+        test_acc  = (torch.cat(preds) == y_te.bool().cpu()).float().mean().item()
+
+    n_tot = sum(p.numel() for p in model.parameters())
+    print(f"    [QNG] final  test_loss={test_loss:.4f}  acc={test_acc:.3f}", flush=True)
+    return dict(n_qubits=n_qubits, n_params=n_tot, n_circ=n_circ,
+                test_loss=test_loss, test_acc=test_acc, losses=losses)
+
+
+def run_quantum_qng_pullback(n_qubits):
+    """
+    Hybrid QNG with pullback metric.
+
+    For a hybrid model  L = BCE(σ(W·q(θ,x)), y)  the correct preconditioner
+    for θ is the pullback of the output-space Fisher through the full pipeline:
+
+        G_eff(θ) = (1/B) Σ_i  p_i(1−p_i) · (W J_i)ᵀ (W J_i)
+
+    where  J_i = ∂q/∂θ|_{x_i}  is the measurement Jacobian (parameter-shift)
+    and    W   is the current linear readout weight vector.
+
+    Unlike the Fubini-Study metric (which lives on the quantum state manifold),
+    G_eff pulls the quantum circuit geometry all the way through W to the loss
+    space — the correct natural geometry for the hybrid pipeline.
+    """
+    torch.manual_seed(42)
+    np.random.seed(42)
+    print(f"  Pullback-QNG n_qubits={n_qubits}…", flush=True)
+
+    model  = make_quantum_model(n_qubits)
+    n_circ = model.weights.numel()
+    n_pairs   = n_qubits * (n_qubits - 1) // 2
+    n_readout = n_qubits + n_pairs
+
+    dev_ps = qml.device("default.qubit", wires=n_qubits)
+
+    @qml.qnode(dev_ps, diff_method="parameter-shift")
+    def circuit_ps(weights, inputs):
+        for layer in range(N_Q_LAYERS):
+            for i in range(n_qubits):
+                qml.RY(inputs[i % N_FEATURES] * pnp.pi, wires=i)
+            for i in range(n_qubits):
+                qml.RX(weights[layer, i, 0], wires=i)
+                qml.RZ(weights[layer, i, 1], wires=i)
+            for i in range(n_qubits - 1):
+                qml.CNOT(wires=[i, i + 1])
+        singles = [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
+        pairs   = [qml.expval(qml.PauliZ(i) @ qml.PauliZ(j))
+                   for i in range(n_qubits) for j in range(i + 1, n_qubits)]
+        return tuple(singles + pairs)
+
+    def circuit_jacobian(w_np, x_np):
+        """∂q_k/∂θ_i via parameter-shift.  Returns J of shape (n_readout, n_circ)."""
+        w_flat = w_np.ravel().astype(float)
+        J = np.zeros((n_readout, n_circ))
+        for i in range(n_circ):
+            wp = w_flat.copy(); wp[i] += np.pi / 2
+            wm = w_flat.copy(); wm[i] -= np.pi / 2
+            qp = np.array(circuit_ps(
+                pnp.array(wp.reshape(w_np.shape), requires_grad=False),
+                pnp.array(x_np.astype(float),     requires_grad=False)))
+            qm = np.array(circuit_ps(
+                pnp.array(wm.reshape(w_np.shape), requires_grad=False),
+                pnp.array(x_np.astype(float),     requires_grad=False)))
+            J[:, i] = (qp - qm) / 2
+        return J
+
+    G_BATCH = n_circ   # B = n_circ guarantees G_eff is generically full-rank
+    G_K     = 25       # steps between metric recomputes
+    G_REG   = 0.01
+    LR_QNG  = 0.005
+
+    opt_lin = torch.optim.Adam(model.linear.parameters(), lr=LR_Q)
+    mt_inv  = np.eye(n_circ)   # identity until first G_eff update
+
+    losses = []
+    for step in range(N_STEPS_Q):
+        if step % G_K == 0:
+            w_np = model.weights.detach().cpu().numpy()
+            W_np = model.linear.weight.detach().cpu().numpy()  # (1, n_readout)
+            idx_g = np.random.choice(N_TRAIN, G_BATCH, replace=False)
+            X_g   = X_tr_np[idx_g]
+            with torch.no_grad():
+                p_g = model(torch.tensor(X_g, dtype=torch.float32)).cpu().numpy()
+
+            G_eff = np.zeros((n_circ, n_circ))
+            for x_i, p_i in zip(X_g, p_g):
+                J_i  = circuit_jacobian(w_np, x_i)  # (n_readout, n_circ)
+                WJ_i = W_np @ J_i                   # (1, n_circ)
+                G_eff += float(p_i * (1 - p_i)) * (WJ_i.T @ WJ_i)
+            G_eff /= G_BATCH
+            mt_inv = np.linalg.inv(G_eff + G_REG * np.eye(n_circ))
+
+        idx = np.random.choice(N_TRAIN, BATCH_Q, replace=False)
+        model.zero_grad()
+        l = F.binary_cross_entropy(model(X_tr[idx]), y_tr[idx])
+        l.backward()
+
+        if model.weights.grad is not None:
+            g     = model.weights.grad.detach().cpu().numpy().ravel()
+            delta = (mt_inv @ g).reshape(model.weights.shape)
+            with torch.no_grad():
+                model.weights -= LR_QNG * torch.tensor(delta, dtype=torch.float32)
+            model.weights.grad = None
+
+        opt_lin.step()
+        losses.append(l.item())
+        if step % 100 == 0:
+            print(f"    [Pullback-QNG] step {step:4d}  loss={l.item():.4f}", flush=True)
+
+    with torch.no_grad():
+        tl_sum, preds = 0.0, []
+        for i in range(0, len(X_te), 128):
+            o = model(X_te[i:i+128])
+            tl_sum += F.binary_cross_entropy(o, y_te[i:i+128]).item() * len(X_te[i:i+128])
+            preds.append((o >= 0.5).cpu())
+        test_loss = tl_sum / len(y_te)
+        test_acc  = (torch.cat(preds) == y_te.bool().cpu()).float().mean().item()
+
+    n_tot = sum(p.numel() for p in model.parameters())
+    print(f"    [Pullback-QNG] final  test_loss={test_loss:.4f}  acc={test_acc:.3f}", flush=True)
+    return dict(n_qubits=n_qubits, n_params=n_tot, n_circ=n_circ,
+                test_loss=test_loss, test_acc=test_acc, losses=losses)
+
+
 # ── Run ───────────────────────────────────────────────────────────────────────
 print("=" * 68)
-print("Classical MLP family  (2→H→1, ReLU, Adam, 800 full-batch steps)")
+print("Classical MLP family  (2→H→1, ReLU, Adam, 800 full-batch steps, two-moons)")
 print("=" * 68)
 c_res = [run_classical(h) for h in [2, 4, 8, 16, 32, 64]]
 
 print("\n" + "=" * 68)
-print("Quantum hybrid family  (n qubits, 2 layers, Adam, 1000 mini-batch steps)")
+print(f"Quantum hybrid family  (n qubits, 2 layers, Adam+cosine, {N_STEPS_Q} mini-batch steps)")
 print("=" * 68)
 q_res = [run_quantum(n) for n in [2, 3, 4, 5, 6]]
+
+print("\n" + "=" * 68)
+print(f"Quantum hybrid family  (Fubini-Study QNG, same architecture, {N_STEPS_Q} steps)")
+print("=" * 68)
+qng_res = [run_quantum_qng(n) for n in [4, 5, 6]]
+
+print("\n" + "=" * 68)
+print(f"Quantum hybrid family  (Pullback QNG, same architecture, {N_STEPS_Q} steps)")
+print("=" * 68)
+pb_res = [run_quantum_qng_pullback(n) for n in [4, 5, 6]]
 
 # ── Summary table ─────────────────────────────────────────────────────────────
 print("\n" + "=" * 78)
@@ -345,7 +576,7 @@ from scipy.stats import linregress
 fig, axes = plt.subplots(2, 2, figsize=(13, 9))
 fig.suptitle(
     "Experiment 4: Classical vs. Quantum Scaling — Fisher Information Efficiency\n"
-    r"Classical 2→H→1 MLP  vs.  Quantum VQC($n$, data re-upload, 2L) + Linear",
+    r"Two-moons dataset  |  Classical 2→H→1 MLP  vs.  Quantum VQC($n$, data re-upload, 2L) + Linear",
     fontsize=11,
 )
 
@@ -387,8 +618,8 @@ for r in q_res:
 ax.set_xlabel(r"Number of trainable parameters $N$")
 ax.set_ylabel("Test loss")
 ax.set_title(
-    r"Classical scaling law: $L(N) \propto N^{-\alpha}$"
-    "\n(quantum points show Hilbert-space dim at comparable $N$)"
+    r"Classical scaling law: $L(N) \propto N^{-\alpha}$  (two-moons)"
+    "\nQuantum gap: vanilla Adam can't exploit quantum geometry → needs QNG"
 )
 ax.legend(fontsize=9)
 
@@ -473,3 +704,52 @@ plt.tight_layout()
 out = "exp4_quantum_scaling.png"
 plt.savefig(out, dpi=300, bbox_inches="tight")
 print(f"\nSaved {out}")
+plt.close()
+
+# ── QNG comparison figure (Adam / Fubini-Study QNG / Pullback QNG) ────────────
+import matplotlib.pyplot as plt
+
+n_cols = len(qng_res)
+fig2, axes2 = plt.subplots(1, n_cols, figsize=(5 * n_cols, 4), sharey=True)
+fig2.suptitle(
+    "Optimiser comparison on hybrid VQC+linear model  (two-moons, same init)\n"
+    r"Adam  vs.  QNG$_{\rm FS}$ (Fubini-Study, circuit only)  vs.  QNG$_{\rm pb}$ (pullback through $W$)",
+    fontsize=11,
+)
+
+adam_by_n = {r["n_qubits"]: r for r in q_res}
+qng_by_n  = {r["n_qubits"]: r for r in qng_res}
+pb_by_n   = {r["n_qubits"]: r for r in pb_res}
+
+def smooth(v, w=20):
+    return np.convolve(v, np.ones(w) / w, mode="valid")
+
+for ax, qr in zip(axes2, qng_res):
+    n  = qr["n_qubits"]
+    ar = adam_by_n[n]
+    pr = pb_by_n[n]
+
+    steps = np.arange(len(smooth(ar["losses"])))
+    ax.plot(steps, smooth(ar["losses"]), color=PAL["c"], lw=2.0,
+            label=f"Adam  (test={ar['test_loss']:.3f})")
+    ax.plot(steps, smooth(qr["losses"]), color=PAL["q"], lw=2.0, linestyle="--",
+            label=r"QNG$_{\rm FS}$" + f"  (test={qr['test_loss']:.3f})")
+    ax.plot(steps, smooth(pr["losses"]), color=PAL["g"], lw=2.0, linestyle="-.",
+            label=r"QNG$_{\rm pb}$" + f"  (test={pr['test_loss']:.3f})")
+
+    for loss_val, col in [(ar["test_loss"], PAL["c"]),
+                          (qr["test_loss"], PAL["q"]),
+                          (pr["test_loss"], PAL["g"])]:
+        ax.axhline(loss_val, color=col, lw=0.8, linestyle=":", alpha=0.5)
+
+    ax.set_xlabel("Training step")
+    if ax is axes2[0]:
+        ax.set_ylabel("BCE loss (smoothed batch)")
+    ax.set_title(fr"$n={n}$ qubits  ({ar['n_circ']} circuit params)")
+    ax.legend(fontsize=8)
+    ax.set_ylim(0.3, 0.85)
+
+plt.tight_layout()
+out2 = "exp4_qng_comparison.png"
+plt.savefig(out2, dpi=300, bbox_inches="tight")
+print(f"Saved {out2}")
