@@ -37,19 +37,22 @@ import pennylane.numpy as pnp
 np.random.seed(42)
 torch.manual_seed(42)
 
-# ── Dataset: 4-feature binary classification with complex boundary ─────────────
+# ── Dataset ────────────────────────────────────────────────────────────────────
+# 4-feature task with 2 clusters per class: hard enough to show a classical
+# scaling law (small MLPs underfit) but simple enough for quantum circuits to learn.
 N_SAMPLES  = 2000
 N_FEATURES = 4
 N_STEPS_C  = 800    # classical training steps (full-batch)
-N_STEPS_Q  = 1000   # quantum training steps   (mini-batch)
-LR         = 5e-3
-BATCH_Q    = 128
+N_STEPS_Q  = 1500   # quantum training steps   (mini-batch)
+LR_C       = 5e-3   # classical learning rate
+LR_Q       = 0.02   # quantum learning rate (higher: circuits need larger steps)
+BATCH_Q    = 32     # small batch keeps the Python loop manageable
 FISHER_N   = 400    # samples for empirical Fisher
 
 X_raw, y = make_classification(
     n_samples=N_SAMPLES, n_features=N_FEATURES,
     n_informative=N_FEATURES, n_redundant=0,
-    n_clusters_per_class=4, class_sep=0.6, random_state=42,
+    n_clusters_per_class=2, class_sep=1.0, random_state=42,
 )
 X = StandardScaler().fit_transform(X_raw)
 X_tr_np, X_te_np, y_tr_np, y_te_np = train_test_split(
@@ -100,7 +103,7 @@ def fisher_stats(F_mat):
 def run_classical(h):
     torch.manual_seed(42)
     model = ClassicalMLP(h)
-    opt   = torch.optim.Adam(model.parameters(), lr=LR)
+    opt   = torch.optim.Adam(model.parameters(), lr=LR_C)
     losses = []
     for _ in range(N_STEPS_C):
         opt.zero_grad()
@@ -122,35 +125,49 @@ def run_classical(h):
 
 # ── Quantum hybrid model family ───────────────────────────────────────────────
 N_Q_LAYERS = 2
-BATCH_Q    = 32   # small batch: each step is a Python loop over samples
+BATCH_Q    = 32   # small batch keeps the Python loop manageable
 
 
 def make_quantum_model(n_qubits):
     """
-    Hybrid quantum-classical model.
+    Hybrid quantum-classical model with DATA RE-UPLOADING.
 
-    Uses an explicit Python loop over the batch to avoid TorchLayer batching
-    issues in PennyLane 0.45.  The PennyLane qnode runs with diff_method=
-    "backprop" so gradients flow through the circuit via PyTorch autograd.
+    At each variational layer the input features are re-encoded before the
+    rotation gates.  This gives the circuit expressivity that grows with depth
+    rather than width, avoids barren-plateau initialisation, and matches the
+    "quantum kernel" viewpoint: the encoded state changes with the data at
+    every layer so the model can learn non-trivial decision boundaries.
+
+    Circuit per layer l:
+      RY(x_i * pi)  for i in range(n_qubits)   <- data encoding (repeated)
+      RX(w[l,i,0])  for i in range(n_qubits)   <- variational
+      RZ(w[l,i,1])  for i in range(n_qubits)   <- variational
+      CNOT(i, i+1)  for i in range(n_qubits-1) <- entanglement
+
+    Number of circuit parameters: N_Q_LAYERS x n_qubits x 2
     """
     dev = qml.device("default.qubit", wires=n_qubits)
 
     @qml.qnode(dev, interface="torch", diff_method="backprop")
     def circuit(inputs, weights):
-        # Cyclic angle encoding: qubit i receives feature i % N_FEATURES
-        for i in range(n_qubits):
-            qml.RY(inputs[i % N_FEATURES] * np.pi, wires=i)
-        # BasicEntanglerLayers: RX rotations + ring of CNOTs
-        qml.BasicEntanglerLayers(weights, wires=range(n_qubits), rotation=qml.RX)
+        for layer in range(N_Q_LAYERS):
+            # Data re-uploading: encode features at every layer
+            for i in range(n_qubits):
+                qml.RY(inputs[i % N_FEATURES] * np.pi, wires=i)
+            # Variational rotations (two axes per qubit for richer geometry)
+            for i in range(n_qubits):
+                qml.RX(weights[layer, i, 0], wires=i)
+                qml.RZ(weights[layer, i, 1], wires=i)
+            # Linear entanglement
+            for i in range(n_qubits - 1):
+                qml.CNOT(wires=[i, i + 1])
         return tuple(qml.expval(qml.PauliZ(i)) for i in range(n_qubits))
 
     class QuantumHybrid(nn.Module):
         def __init__(self):
             super().__init__()
-            self.weights = nn.Parameter(
-                torch.zeros(N_Q_LAYERS, n_qubits)
-            )
-            nn.init.uniform_(self.weights, -0.01, 0.01)
+            self.weights = nn.Parameter(torch.zeros(N_Q_LAYERS, n_qubits, 2))
+            nn.init.uniform_(self.weights, -np.pi / 4, np.pi / 4)
             self.linear = nn.Linear(n_qubits, 1)
 
         def forward(self, x):
@@ -158,7 +175,7 @@ def make_quantum_model(n_qubits):
             for xi in x:
                 raw = circuit(xi, self.weights)
                 q_outs.append(torch.stack(list(raw)))
-            q_out = torch.stack(q_outs).float()   # (batch, n_qubits), cast to float32
+            q_out = torch.stack(q_outs).float()   # (batch, n_qubits)
             return torch.sigmoid(self.linear(q_out)).squeeze(-1)
 
     return QuantumHybrid()
@@ -178,10 +195,14 @@ def compute_qfi(weights_np, n_qubits, eps=1e-4):
 
     @qml.qnode(dev)
     def var_circuit(params):
-        qml.BasicEntanglerLayers(
-            params.reshape(N_Q_LAYERS, n_qubits),
-            wires=range(n_qubits), rotation=qml.RX,
-        )
+        # Mirror the variational part of the training circuit (no data encoding)
+        w = params.reshape(N_Q_LAYERS, n_qubits, 2)
+        for layer in range(N_Q_LAYERS):
+            for i in range(n_qubits):
+                qml.RX(w[layer, i, 0], wires=i)
+                qml.RZ(w[layer, i, 1], wires=i)
+            for i in range(n_qubits - 1):
+                qml.CNOT(wires=[i, i + 1])
         return qml.state()
 
     params = weights_np.ravel().astype(float)
@@ -211,7 +232,7 @@ def run_quantum(n_qubits):
     torch.manual_seed(42)
     print(f"  Quantum n_qubits={n_qubits}…")
     model = make_quantum_model(n_qubits)
-    opt   = torch.optim.Adam(model.parameters(), lr=LR)
+    opt   = torch.optim.Adam(model.parameters(), lr=LR_Q)
     losses = []
     for step in range(N_STEPS_Q):
         idx = np.random.choice(N_TRAIN, BATCH_Q, replace=False)
