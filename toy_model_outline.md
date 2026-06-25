@@ -341,8 +341,8 @@ optimization manifold, with a direct LLM-architecture instance.
 
 **Model**: 101,760 parameters. **Dataset**: WikiText-2,
 10,914,845 train bytes / 1,144,248 validation bytes. **Device**: MPS.
-**Training**: Adam, 50 epochs, lr = 1e-4, batch size 64.
-Total training steps: ~266,450.
+**Training**: Adam, 500 epochs, lr = 1e-4, batch size 64.
+Total training steps: ~2.66 × 10⁶.
 **Fisher estimation**: diagonal empirical approximation, 256 per-sample
 gradients per checkpoint. Regularised condition number
 $\kappa_{\text{reg}} = \lambda_{\max} / (\lambda_{\min} + \delta)$ where
@@ -352,55 +352,65 @@ $\delta = 10^{-3} \cdot \text{tr}(\hat{F})$.
 
 | Approx. stage | Step | $\text{tr}(\hat{F})$ | $\lambda_{\max}$ | $\kappa_{\text{reg}}$ | Val−Train gap |
 |---------------|------|----------------------|------------------|-----------------------|---------------|
-| Init (0 %)    | 0    | ~3                   | ~1.5             | ~12                   | ~0.000        |
-| Early (~5 %)  | ~13,000 | ~170              | ~1.5             | ~10                   | ~−0.131       |
-| Mid (~30 %)   | ~80,000 | ~110              | ~0.9             | ~7                    | ~−0.140       |
-| Mid-late (~50 %) | ~133,000 | ~100           | ~0.7             | ~5                    | ~−0.148       |
-| Final (100 %) | ~266,000 | ~100             | ~0.4             | ~4                    | ~−0.132       |
+| Init (0 %)    | 0         | ~3   | ~1.5 | ~25  | ~0.000  |
+| Early (~5 %)  | ~133,000  | ~100 | ~0.8 | ~6   | ~−0.135 |
+| Mid (~15 %)   | ~400,000  | ~100 | ~0.1 | ~2   | ~−0.145 |
+| Late (~50 %)  | ~1,330,000| ~100 | ~0.8 | ~8   | ~−0.130 |
+| Final (100 %) | ~2,660,000| ~100 | ~0.8 | ~12  | ~−0.125 |
 
 **Key observations:**
 
 - **Early curvature spike**: $\text{tr}(\hat{F})$ rises sharply from ~3 at
-  initialisation to ~170 within the first ~5 % of training, then settles to
-  a stable plateau of ~95–110 for the remainder. $\lambda_{\max}$ starts
-  near 1.5 and decays smoothly to ~0.4. The pattern is consistent with
-  Martens & Grosse 2015: curvature concentrates early, then stabilises as
-  the model settles into a basin.
+  initialisation to ~170 in the very first checkpoint, then settles to a
+  stable plateau of ~95–110 for all remaining training. The pattern is
+  consistent with Martens & Grosse 2015: curvature concentrates immediately
+  as the model exits the random-initialisation regime, then stabilises.
 
-- **Monotonically decreasing regularised condition number**: with 256 Fisher
-  samples and Tikhonov damping ($\delta = 10^{-3}\,\text{tr}(\hat{F})$),
-  $\kappa_{\text{reg}}$ decreases cleanly from ~12 at initialisation to ~4
-  at the end of training. This reflects a progressive improvement in the
-  conditioning of the loss landscape as the model learns, consistent with
-  the view that early training occupies a highly anisotropic region of
-  parameter space while later training occurs in a better-conditioned basin.
+- **U-shaped regularised condition number**: $\kappa_{\text{reg}}$ starts
+  high (~25), drops sharply to a minimum of ~2 around step ~3–4 × 10⁵
+  (~60–70 epochs), then rises again to ~10–15 for the remainder of training.
+  This non-monotonic trajectory reflects a two-phase structure: the model
+  first moves through a maximally well-conditioned region of the loss
+  landscape (where curvature is nearly isotropic), then as it specialises
+  into a sharper basin the leading eigenvalue grows relative to the damped
+  floor. The minimum of $\kappa_{\text{reg}}$ marks the transition point
+  between the two phases and is a potential diagnostic for early stopping.
 
-- **Stable generalisation gap**: $\mathcal{L}_{\text{val}} - \mathcal{L}_{\text{train}}$
-  evolves from ~0 at initialisation to −0.13 to −0.15 and remains stable
-  thereafter. The negative sign reflects the lower byte-level entropy of the
-  validation split rather than underfitting.
+- **Improving generalisation gap**: $\mathcal{L}_{\text{val}} - \mathcal{L}_{\text{train}}$
+  evolves from ~0 at initialisation to a minimum of ~−0.145 around mid-training,
+  then improves (becomes less negative) to ~−0.125 at convergence. The
+  negative sign throughout reflects the lower byte-level entropy of the
+  validation split rather than underfitting; the long-run improvement
+  indicates the model continues to generalise even in the late specialisation
+  phase.
 
-- **κ–gap coupling**: the trajectory panel reveals a clear trend — as
-  $\kappa_{\text{reg}}$ decreases from ~10 to ~4, the gap simultaneously
-  moves from ~−0.150 toward ~−0.132. This correlation suggests that a
-  better-conditioned Fisher geometry is associated with improved
-  generalisation (smaller train–val discrepancy), providing a concrete
-  quantitative link between curvature and generalisation for this model.
+- **κ–gap coupling and phase structure**: the trajectory panel shows the two
+  phases clearly. The early phase (dark purple) spirals inward as
+  $\kappa_{\text{reg}}$ decreases and the gap deepens. The late phase
+  (green–yellow) traces a rightward path as $\kappa_{\text{reg}}$ rises
+  while the gap simultaneously improves. The trajectory does not retrace —
+  the two phases occupy distinct regions of $(\kappa, \Delta\mathcal{L})$
+  space — suggesting that the U-shape in $\kappa_{\text{reg}}$ reflects a
+  genuine phase transition in the optimisation dynamics rather than noise.
 
 ### Figure
 
 ![Experiment 2: Empirical Fisher scalars on a small transformer](exp2_transformer_fisher.png)
 
 A 4-panel figure: (panel 1) training and validation cross-entropy loss over
-epochs — solid train, dashed val — showing stable convergence and a small,
-consistent negative gap throughout; (panel 2) $\text{tr}(\hat{F})$ and
-$\lambda_{\max}$ on a shared log-scale y-axis, revealing the early curvature
-spike and subsequent plateau; (panel 3) condition number $\kappa$ vs.
-training step on a log scale, showing the non-monotonic dip around mid-training;
-(panel 4) connected trajectory through $(\kappa, \Delta\mathcal{L})$ space,
-checkpoint 0 excluded, coloured by training step, with only the final
-checkpoint annotated — illustrating the decoupling between ill-conditioning
-and generalisation gap.
+500 epochs — solid train, dashed val — both converging, with val consistently
+below train due to the lower byte-level entropy of the validation split;
+(panel 2) $\text{tr}(\hat{F})$ and $\lambda_{\max}$ on a shared log-scale
+y-axis — $\text{tr}(\hat{F})$ spikes at the first checkpoint then plateaus
+at ~100, while $\lambda_{\max}$ traces a U-shape (drops to ~0.1 then
+recovers to ~0.8); (panel 3) regularised condition number $\kappa_{\text{reg}}$
+vs. training step — a clear U-shape, falling from ~25 at init to a minimum
+of ~2 near step ~3–4 × 10⁵, then rising back to ~10–15 as the model
+specialises into a sharper basin; (panel 4) connected trajectory through
+$(\kappa_{\text{reg}}, \Delta\mathcal{L})$ space coloured by training step
+— the two phases occupy distinct non-overlapping regions, with the early
+phase spiralling toward low $\kappa$ and the late phase drifting rightward
+as $\kappa$ grows and the gap improves toward ~−0.125.
 
 ---
 
@@ -447,28 +457,36 @@ $$[\mathcal{F}_Q]_{jk} = 4 \, \text{Re}\!\left[\langle \partial_j \psi | \partia
 Compute $\mathcal{F}_Q$ numerically across a grid of $(\theta, \phi)$ values.
 Verify it matches $4 \times g_{jk}$ from Step 1.
 
-**Step 3 — Compare quantum natural gradient to classical gradient**
+**Step 3 — Compare quantum natural gradient to Euclidean gradient**
 
-Define a simple loss: the expected value of $\sigma_z$ (Pauli-Z),
-$\mathcal{L}(\theta, \phi) = \langle \psi | \sigma_z | \psi \rangle = \cos\theta$.
+Define the loss as $\mathcal{L}(\theta, \phi) = \langle \psi | \sigma_x | \psi \rangle = \sin\theta\cos\phi$.
+The choice of $\sigma_x$ over $\sigma_z$ is deliberate: for $\langle\sigma_z\rangle = \cos\theta$
+the partial $\partial\mathcal{L}/\partial\phi = 0$ identically, and since $[\mathcal{F}_Q]_{\theta\theta} = 1$
+the QNG correction is zero everywhere — the angular deviation is trivially $0°$ and the
+experiment is uninformative. Using $\langle\sigma_x\rangle$ ensures both parameters
+contribute to the gradient so the metric correction is non-trivial.
 
-Compute and compare at several points on the Bloch sphere:
+Compute and compare at each $\theta \in (0, \pi)$ with $\phi = \pi/4$ fixed:
 
 - **Euclidean gradient step**: $\Delta\boldsymbol{\lambda} = -\eta \nabla \mathcal{L}$
 - **Quantum natural gradient step**: $\Delta\boldsymbol{\lambda} = -\eta \mathcal{F}_Q^{-1} \nabla \mathcal{L}$
-- **Classical Fisher step** (Bernoulli analogue): $\Delta\theta = -\eta F^{-1} \partial_\theta \mathcal{L}$
 
-Report the angular deviation between the Euclidean and quantum natural
-gradient updates at each point. Show that near the poles ($\theta \approx 0$
-or $\pi$), where $g_{\phi\phi} \to 0$ (the manifold pinches), the
-corrections are largest.
+Because $[\mathcal{F}_Q^{-1}]_{\phi\phi} = 1/\sin^2\theta$, the QNG only rescales the
+$\phi$-component of the gradient. Near the equator ($\theta = \pi/2$) this factor is 1
+and the two updates coincide ($\alpha \approx 0°$). Near the poles $1/\sin^2\theta \to \infty$,
+rotating the update by up to $\sim 90°$. The centre panel of the figure shows this
+deviation as a function of $\theta$: it is shaped like an inverted arch, peaking at
+both poles and touching zero at the equator.
 
 **Step 4 — Optimization trajectory comparison**
 
-Starting from $(\theta_0, \phi_0) = (0.5, 0.5)$, run 50 steps of each
-optimizer toward the minimum at $\theta = \pi$. Plot the trajectory on the
-Bloch sphere. The quantum natural gradient trajectory should follow the
-geodesic more closely.
+Starting from $(\theta_0, \phi_0) = (0.5, 0.5)$, run 50 steps of each optimizer
+toward the minimum of $\mathcal{L} = \langle\sigma_x\rangle = -1$, located at
+$(\theta, \phi) = (\pi/2, \pi)$ — the point $(-1, 0, 0)$ on the Bloch sphere.
+Plot the trajectory on the Bloch sphere. Because the Euclidean optimizer does not
+account for the metric, it treats a step in $\phi$ as equivalent to a step in $\theta$
+everywhere — a poor approximation near the poles — and stalls. The QNG trajectory
+follows the geodesic on $S^2$ and reaches the exact minimum.
 
 ### Tooling
 
@@ -518,35 +536,55 @@ by the numerical and PennyLane-based implementations.
 **Step 3 — Angular deviation $\alpha$ between Euclidean and QNG update**
 (loss $\mathcal{L} = \langle\sigma_x\rangle$, $\phi = \pi/4$ fixed):
 
-Maximum angular deviation: **84.3°** at $\theta = 0.050$ (near the north
-pole). Near the equator ($\theta = \pi/2$) the correction is smallest
-because $g_{\phi\phi} = \sin^2\theta$ is maximal and the inverse metric
-$[\mathcal{F}_Q^{-1}]_{\phi\phi} = 1/\sin^2\theta$ is close to 1. Near the
-poles $g_{\phi\phi} \to 0$, the metric pinches, and QFI⁻¹ rescales the
-$\phi$-gradient by $1/\sin^2\theta \gg 1$, causing the large deviation.
+Maximum angular deviation: **84.3°** at $\theta = 0.050$ (near the north pole).
+The profile has a clean arch shape: $\alpha \to 0°$ at the equator ($\theta = \pi/2$),
+where $[\mathcal{F}_Q^{-1}]_{\phi\phi} = 1/\sin^2(\pi/2) = 1$ and the metric is
+locally Euclidean; $\alpha \to 90°$ near the poles, where $\sin^2\theta \to 0$ so
+$1/\sin^2\theta \to \infty$ and the QNG massively upweights the $\phi$-component
+of the gradient relative to the Euclidean update. The physical meaning: near a
+pole, moving $\phi$ does almost nothing to the quantum state (the parameter is
+near-degenerate), yet Euclidean GD keeps spending gradient signal on it. QNG
+corrects for this by pushing harder in the $\phi$ direction precisely where
+Euclidean GD under-commits.
 
 **Step 4 — Optimisation trajectories** (50 steps, lr = 0.10, start: $\theta_0=0.5, \phi_0=0.5$):
 
 | Optimizer | Final $\mathcal{L} = \langle\sigma_x\rangle$ |
 |-----------|-----------------------------------------------|
-| Euclidean GD | 0.0001 (stalls near saddle) |
+| Euclidean GD | 0.0001 (stalls near equator) |
 | Quantum natural gradient | **−1.0000** (exact minimum reached) |
 
-Euclidean GD stalls near zero because the Euclidean gradient does not account
-for the coordinate singularity of the Bloch sphere parameterisation: it
-treats $\theta$ and $\phi$ directions as equally scaled, causing the
-optimiser to oscillate ineffectively around $\theta \approx \pi/2$. QNG
-corrects for this via $\mathcal{F}_Q^{-1}$, following the geodesic on $S^2$
-and reaching $\langle\sigma_x\rangle = -1$ in 50 steps.
+Euclidean GD treats a step in $\theta$ and a step in $\phi$ as equally
+significant everywhere on the sphere. Near the equator — where the trajectory
+spends most of its time — this means it under-commits to $\phi$ (since
+$1/\sin^2\theta \approx 1$ there, the metric correction is mild) and the
+optimizer oscillates without reaching $\phi = \pi$. QNG applies
+$\mathcal{F}_Q^{-1}$ at each step, which rescales the $\phi$-gradient by
+$1/\sin^2\theta$. The resulting update follows the geodesic on $S^2$, driving
+the state along the sphere surface to the exact minimum $(-1, 0, 0)$ in 50
+steps.
 
 ### Figure
 
 ![Experiment 3: Fubini–Study metric and quantum natural gradient on a qubit state](exp3_qubit_qfi.png)
 
-A 3-panel figure: (left) QFI diagonal components analytic vs. PennyLane across
-$\theta \in [0, \pi]$, (centre) angular deviation $\alpha$ between Euclidean and
-QNG updates vs. $\theta$, (right) Bloch sphere optimisation trajectories for
-Euclidean GD and QNG.
+A 3-panel figure. **(Left)** QFI diagonal components across $\theta \in [0, \pi]$:
+$[\mathcal{F}_Q]_{\theta\theta} = 1$ (flat, blue) and
+$[\mathcal{F}_Q]_{\phi\phi} = \sin^2\theta$ (arch-shaped, orange), with PennyLane
+`quantum_fisher` values overlaid as scatter points that fall exactly on the analytic
+curves — confirming the Fubini–Study metric is correctly recovered numerically.
+The key message is that $\theta$ and $\phi$ are not equivalent parameters: near
+the poles $\phi$ contributes almost nothing to the quantum state even though it
+is numerically free to vary. **(Centre)** Angular deviation $\alpha$ between the
+Euclidean and QNG update directions as a function of $\theta$ (with $\phi = \pi/4$
+fixed). The arch shape mirrors $[\mathcal{F}_Q]_{\phi\phi}$: $\alpha = 0°$ at the
+equator where the metric is locally flat, and $\alpha \approx 85°$ near the poles
+where $\phi$ is near-degenerate and the metric correction is largest. A deviation
+close to $90°$ means Euclidean GD is pointing almost orthogonally to the
+information-geometrically correct direction. **(Right)** Bloch sphere trajectories
+starting from the black dot $(\theta_0, \phi_0) = (0.5, 0.5)$ toward the red
+star minimum at $(-1, 0, 0)$. Euclidean GD (solid blue) stalls near the equator;
+QNG (dashed orange) follows the geodesic to the exact minimum in 50 steps.
 
 ---
 
