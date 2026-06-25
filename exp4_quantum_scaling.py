@@ -53,7 +53,7 @@ torch.manual_seed(42)
 N_SAMPLES  = 2000
 N_FEATURES = 2
 N_STEPS_C  = 800    # classical training steps (full-batch)
-N_STEPS_Q  = 500    # quantum training steps   (ZZ readout converges faster)
+N_STEPS_Q  = 2000   # quantum training steps   (extended to test training-budget hypothesis)
 LR_C       = 5e-3   # classical learning rate
 LR_Q       = 0.01   # quantum learning rate
 BATCH_Q    = 64     # larger batch → stabler gradients through the Python loop
