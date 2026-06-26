@@ -712,3 +712,47 @@ language from speculative implication to grounded hypothesis:
 - [ ] PennyLane qubit simulations run on `"lightning.qubit"` (C++ CPU backend, `pennylane-lightning` required); Experiments 1–3 use `"default.qubit"` for compatibility with `qml.QNGOptimizer` and `qml.qinfo`; note device choices explicitly in the paper
 - [ ] Release code as a supplementary Jupyter notebook
 - [ ] All figures: 300 dpi, axis labels in LaTeX math mode, colorblind-safe palette
+
+---
+
+## Bibliographical references
+
+### Information geometry and natural gradient
+
+- **[Amari 1998]** S. Amari. "Natural gradient works efficiently in learning." *Neural Computation*, 10(2):251–276, 1998. — Foundational paper introducing the natural gradient as steepest descent under the Fisher–Rao metric; motivation for all natural-gradient optimisers in this work.
+
+- **[Martens 2020]** J. Martens. "New insights and perspectives on the natural gradient method." *Journal of Machine Learning Research*, 21(146):1–76, 2020. arXiv:1412.1193. — Comprehensive treatment of natural gradient as approximate second-order optimisation; proves the Fisher equals the Generalised Gauss-Newton matrix under the log-likelihood loss.
+
+- **[Martens & Grosse 2015]** J. Martens and R. Grosse. "Optimizing neural networks with Kronecker-factored approximate curvature." *Proceedings of ICML*, 2015. — Introduces K-FAC, the block-diagonal Kronecker factorisation of the Fisher used as the scalable approximation discussed in Experiment 2.
+
+- **[Kunstner et al. 2019]** F. Kunstner, L. Balles, and P. Hennig. "Limitations of the empirical Fisher approximation for natural gradient descent." *Advances in NeurIPS 32*, 2019. — Shows the empirical Fisher (outer product of gradients) does not generally capture second-order information; motivates using the true Fisher in Experiments 1 and 1b.
+
+### Loss landscape geometry
+
+- **[Pennington & Bahri 2017]** J. Pennington and Y. Bahri. "Geometry of neural network loss surfaces via random matrix theory." *Proceedings of ICML*, pp. 2798–2806, 2017. — Spectral analysis of the Hessian at critical points; the curvature concentration and U-shaped condition number trajectory observed in Experiment 2 is consistent with this framework.
+
+### Optimisation algorithms
+
+- **[Kingma & Ba 2015]** D. P. Kingma and J. Ba. "Adam: A method for stochastic optimization." *ICLR*, 2015. arXiv:1412.6980. — Adam is used as the classical baseline throughout all experiments.
+
+### Neural scaling laws
+
+- **[Kaplan et al. 2020]** J. Kaplan et al. "Scaling laws for neural language models." arXiv:2001.08361, 2020. — Establishes the empirical $L \propto N^{-\alpha}$ power-law framework for language models; Experiment 4 constructs a minimal analogue of this scaling regime for a classical/quantum comparison.
+
+### Quantum computing and quantum machine learning
+
+- **[Stokes et al. 2020]** J. Stokes, J. Izaac, N. Killoran, and G. Carleo. "Quantum natural gradient." *Quantum*, 4:269, 2020. arXiv:1909.02108. — Derives the quantum natural gradient as steepest descent under the Fubini–Study metric; the basis for the QNG comparison in Experiments 3 and 4.
+
+- **[Cerezo et al. 2021]** M. Cerezo et al. "Variational quantum algorithms." *Nature Reviews Physics*, 3:625–644, 2021. — Comprehensive review of VQAs; situates the QCNN and hybrid model choices in the broader literature.
+
+- **[Pesah et al. 2021]** A. Pesah, M. Cerezo, S. Wang, T. Volkoff, A. T. Sornborger, and P. J. Coles. "Absence of barren plateaus in quantum convolutional neural networks." *Physical Review X*, 11:041011, 2021. arXiv:2011.02966. — Proves that the brick-wall QCNN architecture used in Experiment 4 has gradients that vanish at most polynomially; justifies architectural choice.
+
+- **[Pérez-Salinas et al. 2020]** A. Pérez-Salinas, A. Cervera-Lierta, E. Gil-Fuster, and J. I. Latorre. "Data re-uploading for a universal quantum classifier." *Quantum*, 4:226, 2020. arXiv:1907.02085. — Introduces the data re-uploading encoding scheme ($\text{RY}(x \cdot \theta)$ interleaved with variational layers) adopted in Experiment 4.
+
+- **[McClean et al. 2018]** J. R. McClean, S. Boixo, V. N. Smelyanskiy, R. Babbush, and H. Neven. "Barren plateaus in quantum neural network training landscapes." *Nature Communications*, 9:4812, 2018. — Establishes that random parameterised circuits suffer from exponentially vanishing gradients; motivates the structured QCNN architecture and near-zero initialisation strategy.
+
+- **[Schuld & Killoran 2022]** M. Schuld and N. Killoran. "Is quantum advantage the right goal for quantum machine learning?" *PRX Quantum*, 3:030101, 2022. arXiv:2203.01340. — Argues for framing quantum ML contributions in terms of geometric or structural insights rather than raw computational advantage; directly motivates the Fisher-information-per-parameter framing of Experiment 4.
+
+### Software
+
+- **[Bergholm et al. 2018]** V. Bergholm et al. "PennyLane: Automatic differentiation of hybrid quantum-classical computations." arXiv:1811.04968, 2018 (updated 2022). — The quantum simulation and differentiation framework used in Experiments 3 and 4; provides `qml.QNGOptimizer`, `qml.qinfo.quantum_fisher`, and `lightning.qubit`.
