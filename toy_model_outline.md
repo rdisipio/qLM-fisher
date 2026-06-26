@@ -602,7 +602,7 @@ Directly address R2's observation that "there isn't any actual evidence showing 
 - **Classical family**: 2→H→1 MLP (ReLU hidden, sigmoid output), $H \in \{1, 2, 3, 4, 8, 16, 32, 64\}$, Adam, 1000 full-batch steps.
 - **Quantum family**: data-re-uploading QCNN, brick-wall local 2-qubit blocks, $n \in \{2,3,4,5,6,7,8\}$ qubits, $N_{\rm layers}=3$, followed by a classical linear readout (single-qubit Z measurements + pairwise ZZ correlations). Encoding: $\text{RY}(x \cdot \pi/4)$, which maps the standardised range $[-2, 2]$ to $[-\pi/2, \pi/2]$ — monotone, no wrapping. Adam: 1000 mini-batch steps, cosine LR 0.01→10$^{-3}$; pullback QNG: 1000 mini-batch steps, cosine LR from 0.005 to $10^{-3}$, metric recomputed every 50 steps on $B=32$ samples, Tikhonov $\varepsilon=0.01$.
 - **QNG design note**: the Fubini–Study preconditioner (`qml.metric_tensor`) is actively harmful in hybrid models — it increased loss by 0.02–0.04 relative to Adam in all cases because it applies state-space curvature without accounting for the readout $W$. The correct object is $G_{\rm eff}$: its $(i,j)$ entry measures how jointly $\theta_i, \theta_j$ influence the model output through $W$. After regularisation $G_{\rm eff}$ has $\kappa \approx 2$ (well-conditioned) vs. $\kappa \approx 10^{12}$ for the raw QFI.
-- **Dataset wiring**: dataset generation and `N_TURNS` / `NOISE` are controlled from the notebook via `exp5s.load_dataset(X, y)` — the module defaults are decoupled from the notebook experiment, so `N_TURNS` can be swept without restarting the kernel.
+
 
 ### Observed results
 
