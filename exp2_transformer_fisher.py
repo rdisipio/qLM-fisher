@@ -270,6 +270,6 @@ ax.set_xscale("log")
 ax.axhline(0, color="gray", linestyle=":", linewidth=0.8)
 
 plt.tight_layout()
-out = "exp2_transformer_fisher.png"
+out = "plots/exp2_transformer_fisher.png"
 plt.savefig(out, dpi=300, bbox_inches="tight")
 print(f"\nSaved {out}")

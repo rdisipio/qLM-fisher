@@ -435,8 +435,8 @@ def plot_scaling_fisher(c_res, adam_res, save=True):
 
     plt.tight_layout()
     if save:
-        plt.savefig("artifacts/exp4_scaling_fisher.png", dpi=300, bbox_inches="tight")
-        print("\nSaved artifacts/exp4_scaling_fisher.png")
+        plt.savefig("plots/exp4_scaling_fisher.png", dpi=300, bbox_inches="tight")
+        print("\nSaved plots/exp4_scaling_fisher.png")
     return fig
 
 
@@ -473,8 +473,8 @@ def plot_qng_comparison(c_res, adam_res, pb_res, save=True):
     ax.set_ylim(bottom=0.1)
     plt.tight_layout()
     if save:
-        plt.savefig("artifacts/exp4_qng.png", dpi=300, bbox_inches="tight")
-        print("Saved artifacts/exp4_qng.png")
+        plt.savefig("plots/exp4_qng.png", dpi=300, bbox_inches="tight")
+        print("Saved plots/exp4_qng.png")
     return fig
 
 

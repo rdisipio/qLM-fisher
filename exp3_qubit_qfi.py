@@ -277,6 +277,6 @@ ax3.set_title(r"Bloch sphere trajectory ($L=\langle\sigma_x\rangle$)")
 ax3.legend(fontsize=7, loc="upper left")
 
 plt.tight_layout()
-out = "exp3_qubit_qfi.png"
+out = "plots/exp3_qubit_qfi.png"
 plt.savefig(out, dpi=300, bbox_inches="tight")
 print(f"\nSaved {out}")

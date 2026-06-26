@@ -205,7 +205,7 @@ ax.legend(handles=[
 ], fontsize=8)
 
 plt.tight_layout()
-out = "exp1_logistic_regression.png"
+out = "plots/exp1_logistic_regression.png"
 plt.savefig(out, dpi=300, bbox_inches="tight")
 print(f"Saved {out}")
 
@@ -460,6 +460,6 @@ ax.set_title(r"Fisher eigenvalue spectrum $\lambda(\hat{F})$")
 ax.legend(fontsize=8)
 
 plt.tight_layout()
-out_mlp = "exp1_mlp.png"
+out_mlp = "plots/exp1_mlp.png"
 plt.savefig(out_mlp, dpi=300, bbox_inches="tight")
 print(f"Saved {out_mlp}")
