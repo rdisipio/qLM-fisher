@@ -32,13 +32,14 @@ torch.manual_seed(42)
 # ── Hyperparameters ────────────────────────────────────────────────────────────
 N_SAMPLES  = 2000
 N_FEATURES = 2
-N_Q_LAYERS = 3
-N_STEPS_C  = 800
-N_STEPS_Q  = 2000
-LR_C       = 5e-3
-LR_Q       = 0.01
-BATCH_Q    = 32
-FISHER_N   = 400
+N_Q_LAYERS  = 3
+N_STEPS_C   = 800
+N_STEPS_Q   = 1000
+LR_C        = 5e-3
+LR_Q        = 0.01
+LR_QNG_MIN  = 1e-3
+BATCH_Q     = 32
+FISHER_N    = 400
 
 # ── Dataset ────────────────────────────────────────────────────────────────────
 X_raw, y = make_moons(n_samples=N_SAMPLES, noise=0.25, random_state=42)
@@ -224,15 +225,16 @@ def _eval(model):
 # B. QCNN + Adam
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run_qcnn_adam(n_qubits):
+def run_qcnn_adam(n_qubits, n_steps=None):
+    n_steps = n_steps if n_steps is not None else N_STEPS_Q
     torch.manual_seed(42); np.random.seed(42)
     print(f"  [QCNN+Adam] n={n_qubits}…", flush=True)
     model  = make_qcnn(n_qubits)
     n_circ = model.weights.numel()
     opt    = torch.optim.Adam(model.parameters(), lr=LR_Q)
-    sched  = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=N_STEPS_Q, eta_min=1e-4)
+    sched  = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=n_steps, eta_min=1e-3)
     losses = []
-    for step in range(N_STEPS_Q):
+    for step in range(n_steps):
         idx = np.random.choice(N_TRAIN, BATCH_Q, replace=False)
         opt.zero_grad()
         l = F.binary_cross_entropy(model(X_tr[idx]), y_tr[idx])
@@ -257,11 +259,13 @@ def run_qcnn_adam(n_qubits):
 # C. QCNN + Pullback QNG
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run_qcnn_qng_pb(n_qubits):
+def run_qcnn_qng_pb(n_qubits, n_steps=None, lr_qng_min=None):
     """
     Pullback QNG on QCNN: combines local-gate geometry (no barren plateau)
     with the correct hybrid metric G_eff = (1/B) Σ p_i(1-p_i)(WJ_i)ᵀ(WJ_i).
     """
+    n_steps    = n_steps    if n_steps    is not None else N_STEPS_Q
+    lr_qng_min = lr_qng_min if lr_qng_min is not None else LR_QNG_MIN
     torch.manual_seed(42); np.random.seed(42)
     print(f"  [QCNN+QNG_pb] n={n_qubits}…", flush=True)
 
@@ -303,15 +307,15 @@ def run_qcnn_qng_pb(n_qubits):
         return J
 
     opt_lin  = torch.optim.Adam(model.linear.parameters(), lr=LR_Q)
-    sched_lin = torch.optim.lr_scheduler.CosineAnnealingLR(opt_lin, T_max=N_STEPS_Q, eta_min=1e-4)
+    sched_lin = torch.optim.lr_scheduler.CosineAnnealingLR(opt_lin, T_max=n_steps, eta_min=1e-3)
     G_BATCH  = 32; G_K = 50; G_REG = 0.01
-    LR_QNG_MAX = 0.005; LR_QNG_MIN = 1e-4
+    LR_QNG_MAX = 0.005
     mt_inv   = np.eye(n_circ)
     losses   = []
-    for step in range(N_STEPS_Q):
+    for step in range(n_steps):
         # cosine annealing for the circuit natural-gradient step size
-        lr_qng = LR_QNG_MIN + 0.5 * (LR_QNG_MAX - LR_QNG_MIN) * (
-            1 + np.cos(np.pi * step / N_STEPS_Q))
+        lr_qng = lr_qng_min + 0.5 * (LR_QNG_MAX - lr_qng_min) * (
+            1 + np.cos(np.pi * step / n_steps))
         if step % G_K == 0:
             w_np  = model.weights.detach().cpu().numpy()
             W_np  = model.linear.weight.detach().cpu().numpy()
