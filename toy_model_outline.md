@@ -625,20 +625,26 @@ Power-law fit: $L(N) \propto N^{-1.01}$ ($R^2 = 0.92$). The spiral produces a cl
 
 | Scenario | $n$ qubits | $N_{\rm circ}$ | Test loss | Accuracy |
 |----------|------------|----------------|-----------|----------|
-| QCNN + Adam | 2 |  9 | ~0.35 | ~86 % |
-| QCNN + Adam | 3 | 18 | ~0.19 | ~92 % |
-| QCNN + Adam | 4 | 27 | ~0.18 | ~93 % |
-| QCNN + Adam | 5 | 36 | ~0.16 | ~93 % |
-| QCNN + Adam | 6 | 45 | ~0.15 | ~93 % |
-| QCNN + QNG$_{\rm pb}$ | 4 | 27 | ~0.16 | ~93 % |
-| QCNN + QNG$_{\rm pb}$ | 5 | 36 | ~0.14 | ~93 % |
-| QCNN + QNG$_{\rm pb}$ | 6 | 45 | ~0.14 | ~94 % |
+| QCNN + Adam | 2 |  9 | 0.13 | 95 % |
+| QCNN + Adam | 3 | 18 | 0.08 | 99 % |
+| QCNN + Adam | 4 | 27 | 0.04 | 99 % |
+| QCNN + Adam | 5 | 36 | 0.03 | 100 % |
+| QCNN + Adam | 6 | 45 | 0.03 | 100 % |
+| QCNN + Adam | 7 | 54 | 0.03 | 100 % |
+| QCNN + Adam | 8 | 63 | 0.02 | 100 % |
+| QCNN + QNG$_{\rm pb}$ | 2 |  9 | 0.12 | 96 % |
+| QCNN + QNG$_{\rm pb}$ | 3 | 18 | 0.11 | 100 % |
+| QCNN + QNG$_{\rm pb}$ | 4 | 27 | 0.05 | 99 % |
+| QCNN + QNG$_{\rm pb}$ | 5 | 36 | 0.03 | 100 % |
+| QCNN + QNG$_{\rm pb}$ | 6 | 45 | 0.03 | 100 % |
+| QCNN + QNG$_{\rm pb}$ | 7 | 54 | 0.03 | 99 % |
+| QCNN + QNG$_{\rm pb}$ | 8 | 63 | 0.02 | 100 % |
 
 Key findings:
 
 1. **Both MLP and QCNN follow power-law-like scaling**: on a log-log plot, QCNN+Adam and QCNN+QNG$_{\rm pb}$ both trace roughly power-law curves with exponents comparable to the classical MLP. Neither diverges from the trend at larger $n$, suggesting the spiral task is well-matched to both families.
 
-2. **Quantum advantage at small parameter count**: at $N_{\rm circ} \approx 9$–18 (n=2–3), QCNN+Adam achieves 0.19–0.35 loss, while a classical MLP with the same parameter budget (H=1–3, $N_{\rm params}$=5–13) achieves 0.38–0.55. The quantum circuits extract more information per parameter, consistent with the $\text{tr}(F)/N = 1.0$ advantage.
+2. **Quantum advantage at small parameter count**: at $N_{\rm circ} = 9$ (n=2), QCNN+Adam achieves 0.13 loss and QCNN+QNG$_{\rm pb}$ achieves 0.12, while a classical MLP with the same budget (H=1–2, $N_{\rm params}$=5–9) achieves 0.47–0.57. The gap narrows quickly with scale: by n=4 ($N_{\rm circ}=27$) all quantum models reach 0.04–0.05, matching H=8 (33 params) on the classical side.
 
 3. **Pullback QNG maintains its edge**: QCNN+QNG$_{\rm pb}$ consistently achieves ~0.02 lower loss than QCNN+Adam at equal $n$. The advantage is consistent across the full spiral.
 
