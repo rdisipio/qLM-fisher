@@ -593,9 +593,7 @@ QNG (dashed orange) follows the geodesic to the exact minimum in 50 steps.
 
 ### Purpose
 
-Directly address R2's observation that "there isn't any actual evidence showing quantum systems provide more efficient optimization paths." Two-moons was a candidate dataset but exhibits a hard capacity threshold rather than a power law: loss drops sharply from H=2 to H=8 then plateaus. This step function in log-log space is unsuitable for comparing scaling exponents.
-
-A two-class Archimedean spiral has boundary complexity that grows continuously with the number of turns, so any model that is always underfitting traces a genuine power law $L \propto N^{-\alpha}$ as parameter count increases. This directly tests whether quantum circuits follow the same scaling exponent as classical MLPs and whether the $\text{tr}(F)/N$ advantage shows up as a lower-loss intercept or a steeper slope. It also carries the pullback QNG comparison: the correct natural-gradient preconditioner for hybrid models is $G_{\rm eff} = (1/B)\sum p_i(1-p_i)(WJ_i)^\top(WJ_i)$ — the pullback of the output Fisher through the readout — not the Fubini–Study metric alone.
+Directly address R2's observation that "there isn't any actual evidence showing quantum systems provide more efficient optimization paths." A two-class Archimedean spiral has boundary complexity that grows continuously with the number of turns, so any model that is always underfitting traces a genuine power law $L \propto N^{-\alpha}$ as parameter count increases. This directly tests whether quantum circuits follow the same scaling exponent as classical MLPs and whether the $\text{tr}(F)/N$ advantage shows up as a lower-loss intercept or a steeper slope. It also carries the pullback QNG comparison: the correct natural-gradient preconditioner for hybrid models is $G_{\rm eff} = (1/B)\sum p_i(1-p_i)(WJ_i)^\top(WJ_i)$ — the pullback of the output Fisher through the readout — not the Fubini–Study metric alone.
 
 ### Setup
 
@@ -621,7 +619,7 @@ A two-class Archimedean spiral has boundary complexity that grows continuously w
 | MLP H=32 | 129 | ~0.15 | ~94 % |
 | MLP H=64 | 257 | ~0.14 | ~95 % |
 
-Power-law fit: $L(N) \propto N^{-1.01}$ ($R^2 = 0.92$). Unlike two-moons, the spiral produces a clean log-log linear relationship across two decades of parameter count, confirming that the model is always underfitting and that additional capacity continuously improves generalisation. This is the regime required for neural scaling law analysis.
+Power-law fit: $L(N) \propto N^{-1.01}$ ($R^2 = 0.92$). The spiral produces a clean log-log linear relationship across two decades of parameter count, confirming that the model is always underfitting and that additional capacity continuously improves generalisation. This is the regime required for neural scaling law analysis.
 
 **Quantum family results**
 
